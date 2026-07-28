@@ -1,1 +1,0 @@
-console.log("Cineverse is running");

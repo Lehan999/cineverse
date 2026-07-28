@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <title>{% block title %}Cineverse{% endblock %}</title>
+        <link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}">
+    </head>
+    <body>
+        <nav class="navbar">
+            <div class="logo">Cineverse</div>
+            <ul class="nav-links">
+                <li> <a href="{{url_for('main.home')}}" class="active">Home</a> </li>
+                <li> <a href="#">Movies</a> </li>
+                <li> <a href="#">Genres</a></li>
+                <li> <a href="#">My List</a></li>
+            </ul>
+
+            <div class="nav-right">
+                <input type="text" class="search-box" placeholder="search movies, shows...">
+
+                <button class="profile-button">A</button>
+            </div>
+        </nav>
+        <main>
+            {% block content %}
+            {% endblock %}
+        </main>
+        <script src="{{url_for('static',filename='js/main.js')}}"></script>
+    </body>
+</html>
