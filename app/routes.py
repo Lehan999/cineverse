@@ -6,3 +6,8 @@ main=Blueprint("main",__name__)
 
 def home():
     return render_template("home.html")
+
+@main.route("/movie")
+
+def movie():
+    return render_template("movie.html")

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}
+
+Movie Details
+
+{% endblock %}
+
+{% block content %}
+
+<section class="movie-details">
+
+    <div class="movie-poster">
+
+        <img src="{{url_for('static',filename='images/avengers_endgame.png')}}" alt="avengers endgame">
+   
+    </div>
+
+    <div class="movie-info">
+
+        <h1>Avengers endgame</h1>
+        <p> <strong> Genre:</strong>Action   Adventure   Sci-Fi</p>
+        <p> <strong> Release Year:</strong> 2019</p>
+        <p> <strong>Duration:</strong> 3hr 1min </p>
+        <p> <strong>IMDB Rating:</strong> ⭐ 8.4/10 </p>
+        <h3>Description</h3>
+
+        <p>
+            After the devastating events of infinity War, the remaining Avengers unite for one final battle to restore the universe.
+        </p>
+        <button> ▶ Watch Trailer </button>
+    </div>
+</section>
+
+{% endblock %}

@@ -7,18 +7,98 @@ Home | Cineverse
 {% block content %}
 
 <section class="hero-section">
-    <p class="small-heading">Welcome to CINEVERSE</p>
-    <h1>
-        Endless Stories,<br>
-        Endless <span>Entertainment.</span>
-    </h1>
-    <p class="hero-description">
-        Explore a universe of movies across every genre.<br>
-        stream anywhere, anytime.
-    </p>
 
-    <button class="watch-button">Watch Trailer</button>
-    <button class="learn-button">Learn More</button>
+    <div class="hero-left">
+
+        <p class="small-heading">WELCOME TO CINEVERSE</p>
+
+        <h1>
+            Endless stories,<br>
+            Endless <span>Entertainment</span>
+        </h1>
+
+        <p class="hero-description">
+            Explore a universe of movies across every genre.
+        </p>
+
+        <button class="watch-button">Watch trailer</button>
+
+        <button class="learn-button">Learn more</button>
+    </div>
+
+    <div class="hero-right">
+        <img src="{{ url_for('static',filename='images/avengers_endgame.png')}}" alt="avengers endgame">
+    </div>
 </section>
 
+<section class="popular-movies">
+
+    <h2> popular-movies </h2>
+
+    <div class="movie-container">
+        <a href="{{url_for('main.movie')}}">
+
+            <div class="movie-card">
+
+                <img src="{{ url_for('static',filename='images/avengers_infinitywar.jpg')}}" alt="Avengers infinity war">
+
+                <h3>Avengers infinity war</h3>
+
+                <p>Action  Adventure  Sci-fi</p>
+            </div> 
+            
+        </a>
+
+        <div class="movie-card">
+
+            <img src="{{ url_for('static',filename='images/kgf1.jpg')}}" alt="KGF CHAPTER 1">
+
+            <h3>KGF CHAPTER 1</h3>
+
+            <p>Period Action   Crime   Drama</p>
+        </div>
+
+        
+        <div class="movie-card">
+
+            <img src="{{ url_for('static',filename='images/kgf2.jpg')}}" alt="KGF CHAPTER 2">
+
+            <h3>KGF CHAPTER 2</h3>
+
+            <p>Period Action   Crime   Drama</p>
+        </div>
+
+         
+        <div class="movie-card">
+
+            <img src="{{ url_for('static',filename='images/salaar1.jpg')}}" alt="KGF CHAPTER 2">
+
+            <h3>SALAAR</h3>
+
+            <p>Period Action   Drama   Thriller</p>
+        </div>
+
+         
+        <div class="movie-card">
+
+            <img src="{{ url_for('static',filename='images/bahubali_1.jpg')}}" alt="BAHUBALI 1">
+
+            <h3>BAHUBALI 1</h3>
+
+            <p>Epic-Action   Historical/Mythological fiction   drama</p>
+        </div>
+
+         
+        <div class="movie-card">
+
+            <img src="{{ url_for('static',filename='images/bahubali_2.jpg')}}" alt="BAHUBALI 2">
+
+            <h3>BAHUBALI 2</h3>
+
+            <p>Epic-Action   Historical/Mythological fiction   drama</p>
+        </div>
+
+
+    </div>
+</section>
 {% endblock %}
