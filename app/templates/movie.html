@@ -12,21 +12,20 @@ Movie Details
 
     <div class="movie-poster">
 
-        <img src="{{url_for('static',filename='images/avengers_endgame.png')}}" alt="avengers endgame">
-   
+        <img src="{{ url_for('static', filename=movie.poster) }}" alt="{{ movie.title}}">
     </div>
 
     <div class="movie-info">
 
-        <h1>Avengers endgame</h1>
-        <p> <strong> Genre:</strong>Action   Adventure   Sci-Fi</p>
-        <p> <strong> Release Year:</strong> 2019</p>
-        <p> <strong>Duration:</strong> 3hr 1min </p>
-        <p> <strong>IMDB Rating:</strong> ⭐ 8.4/10 </p>
+        <h1> {{movie.title}} </h1>
+        <p> <strong> Genre:</strong> {{movie.genre}} </p>
+        <p> <strong> Release Year:</strong> {{movie.release_year}} </p>
+        <p> <strong>Duration:</strong> {{movie.duration}} </p>
+        <p> <strong>IMDB Rating:</strong> ⭐ {{movie.imdb_rating}} </p>
         <h3>Description</h3>
 
         <p>
-            After the devastating events of infinity War, the remaining Avengers unite for one final battle to restore the universe.
+            {{movie.description}}
         </p>
         <button> ▶ Watch Trailer </button>
     </div>

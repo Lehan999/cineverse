@@ -36,69 +36,21 @@ Home | Cineverse
     <h2> popular-movies </h2>
 
     <div class="movie-container">
-        <a href="{{url_for('main.movie')}}">
 
+        {% for movie in movies %}
+
+        <a href="{{url_for('main.movie', id=movie.id) }}">
             <div class="movie-card">
+                <img src="{{url_for('static',filename=movie.poster) }}" alt="{{movie.title}}">
 
-                <img src="{{ url_for('static',filename='images/avengers_infinitywar.jpg')}}" alt="Avengers infinity war">
-
-                <h3>Avengers infinity war</h3>
-
-                <p>Action  Adventure  Sci-fi</p>
-            </div> 
-            
+                <h3> {{movie.title}} </h3>
+                <p> {{movie.genre}} </p>
+            </div>
         </a>
 
-        <div class="movie-card">
-
-            <img src="{{ url_for('static',filename='images/kgf1.jpg')}}" alt="KGF CHAPTER 1">
-
-            <h3>KGF CHAPTER 1</h3>
-
-            <p>Period Action   Crime   Drama</p>
-        </div>
-
-        
-        <div class="movie-card">
-
-            <img src="{{ url_for('static',filename='images/kgf2.jpg')}}" alt="KGF CHAPTER 2">
-
-            <h3>KGF CHAPTER 2</h3>
-
-            <p>Period Action   Crime   Drama</p>
-        </div>
-
-         
-        <div class="movie-card">
-
-            <img src="{{ url_for('static',filename='images/salaar1.jpg')}}" alt="KGF CHAPTER 2">
-
-            <h3>SALAAR</h3>
-
-            <p>Period Action   Drama   Thriller</p>
-        </div>
-
-         
-        <div class="movie-card">
-
-            <img src="{{ url_for('static',filename='images/bahubali_1.jpg')}}" alt="BAHUBALI 1">
-
-            <h3>BAHUBALI 1</h3>
-
-            <p>Epic-Action   Historical/Mythological fiction   drama</p>
-        </div>
-
-         
-        <div class="movie-card">
-
-            <img src="{{ url_for('static',filename='images/bahubali_2.jpg')}}" alt="BAHUBALI 2">
-
-            <h3>BAHUBALI 2</h3>
-
-            <p>Epic-Action   Historical/Mythological fiction   drama</p>
-        </div>
-
+        {% endfor %}
 
     </div>
+
 </section>
 {% endblock %}
