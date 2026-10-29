@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}My account | Cineverse{% endblock %}
+
+{% block content %}
+<section class="account-page">
+    <div class="section-heading"><div><p class="small-heading">YOUR CINEVERSE</p><h1>My reviews</h1></div><p>Signed in as <strong>{{ current_user.username }}</strong></p></div>
+    <div class="review-list account-review-list">
+        {% for review in reviews %}
+            <article class="review-card account-review-card">
+                <div><h2>{{ review.movie_title }}</h2><span class="movie-rating">★ {{ review.rating }}/10</span></div>
+                {% if review.review_text %}<p>{{ review.review_text }}</p>{% endif %}
+                <time datetime="{{ review.updated_at.isoformat() }}">Updated {{ review.updated_at.strftime('%b %d, %Y') }}</time>
+                <a class="text-link" href="{{ url_for('main.movie', movie_id=review.movie_id, local=1 if review.is_local_movie else none, source=none if review.is_local_movie else 'tmdb') }}">Open movie</a>
+            </article>
+        {% else %}<p class="empty-state">You have not rated or reviewed a movie yet. Browse the <a href="{{ url_for('main.home') }}#popular-movies">popular movies</a> to get started.</p>{% endfor %}
+    </div>
+</section>
+{% endblock %}

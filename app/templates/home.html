@@ -7,50 +7,46 @@ Home | Cineverse
 {% block content %}
 
 <section class="hero-section">
-
     <div class="hero-left">
-
         <p class="small-heading">WELCOME TO CINEVERSE</p>
-
-        <h1>
-            Endless stories,<br>
-            Endless <span>Entertainment</span>
-        </h1>
-
-        <p class="hero-description">
-            Explore a universe of movies across every genre.
-        </p>
-
-        <button class="watch-button">Watch trailer</button>
-
-        <button class="learn-button">Learn more</button>
+        {% if featured_movie %}
+            <h1>Featured: <span>{{ featured_movie.title }}</span></h1>
+            <p class="hero-description">{{ featured_movie.overview }}</p>
+            <p class="hero-meta">{% if featured_movie.release_date %}{{ featured_movie.release_date }}{% endif %}{% if featured_movie.rating is not none %} · TMDB ★ {{ '%.1f'|format(featured_movie.rating) }}/10{% endif %}</p>
+            <a class="button button-primary" href="{{ url_for('main.movie', movie_id=featured_movie.id, local=1 if featured_movie.is_local|default(false) else none, source=none if featured_movie.is_local|default(false) else 'tmdb') }}">View movie</a>
+            <a class="button button-light" href="#popular-movies">Browse popular movies</a>
+        {% else %}
+            <h1>Endless stories,<br><span>Endless entertainment</span></h1>
+            <p class="hero-description">Explore movies across every genre.</p>
+            <a class="button button-primary" href="#popular-movies">Browse movies</a>
+        {% endif %}
     </div>
-
-    <div class="hero-right">
-        <img src="{{ url_for('static',filename='images/avengers_endgame.png')}}" alt="avengers endgame">
-    </div>
+    {% if featured_movie and featured_movie.poster_url %}<div class="hero-right"><img src="{{ featured_movie.poster_url }}" alt="{{ featured_movie.title }} poster"></div>{% endif %}
 </section>
 
-<section class="popular-movies">
-
-    <h2> popular-movies </h2>
-
-    <div class="movie-container">
-
-        {% for movie in movies %}
-
-        <a href="{{url_for('main.movie', id=movie.id) }}">
-            <div class="movie-card">
-                <img src="{{url_for('static',filename=movie.poster) }}" alt="{{movie.title}}">
-
-                <h3> {{movie.title}} </h3>
-                <p> {{movie.genre}} </p>
-            </div>
-        </a>
-
-        {% endfor %}
-
+<section class="popular-movies" id="popular-movies">
+    <div class="section-heading">
+        <div><p class="small-heading">CINEVERSE PICKS</p><h2>{{ 'Search results' if query|default('') else 'Popular movies' }}</h2></div>
+        {% if query|default('') %}<p>Results for “{{ query }}”</p>{% endif %}
     </div>
-
+    {% if tmdb_error %}<p class="status-message" role="status">{{ tmdb_error }}{% if movies %} Showing saved movies where available.{% endif %}</p>{% endif %}
+    <div class="movie-container">
+        {% for movie in movies %}
+            <a class="movie-link" href="{{ url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+                <article class="movie-card">
+                    {% if movie.poster_url %}<img src="{{ movie.poster_url }}" alt="{{ movie.title }} poster" loading="lazy">{% else %}<div class="poster-placeholder">Poster unavailable</div>{% endif %}
+                    <div class="movie-card-content">
+                        <h3>{{ movie.title }}</h3>
+                        {% if movie.genres %}<p>{{ movie.genres|join(', ') }}</p>{% endif %}
+                        {% if movie.rating is not none %}<p class="movie-rating">TMDB ★ {{ '%.1f'|format(movie.rating) }}</p>{% endif %}
+                        {% if movie.release_date %}<p class="movie-date">{{ movie.release_date }}</p>{% endif %}
+                        {% if movie.overview %}<p class="movie-overview">{{ movie.overview }}</p>{% endif %}
+                    </div>
+                </article>
+            </a>
+        {% else %}
+            <p class="empty-state">No movies found.</p>
+        {% endfor %}
+    </div>
 </section>
 {% endblock %}

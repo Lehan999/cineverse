@@ -1,34 +1,80 @@
 {% extends "base.html" %}
 
 {% block title %}
-
-Movie Details
-
+{{ movie.title if movie else 'Movie details' }} | Cineverse
 {% endblock %}
 
 {% block content %}
 
+{% if tmdb_error|default('') %}<p class="status-message" role="status">{{ tmdb_error }}</p>{% endif %}
+
+{% if movie %}
 <section class="movie-details">
-
     <div class="movie-poster">
-
-        <img src="{{ url_for('static', filename=movie.poster) }}" alt="{{ movie.title}}">
+        {% if movie.poster_url %}<img src="{{ movie.poster_url }}" alt="{{ movie.title }} poster">{% else %}<div class="poster-placeholder">Poster unavailable</div>{% endif %}
     </div>
-
     <div class="movie-info">
-
-        <h1> {{movie.title}} </h1>
-        <p> <strong> Genre:</strong> {{movie.genre}} </p>
-        <p> <strong> Release Year:</strong> {{movie.release_year}} </p>
-        <p> <strong>Duration:</strong> {{movie.duration}} </p>
-        <p> <strong>IMDB Rating:</strong> ⭐ {{movie.imdb_rating}} </p>
-        <h3>Description</h3>
-
-        <p>
-            {{movie.description}}
-        </p>
-        <button> ▶ Watch Trailer </button>
+        <p class="small-heading">MOVIE DETAILS</p>
+        <h1>{{ movie.title }}</h1>
+        <p><strong>Genre:</strong> {{ movie.genres|join(', ') or 'Not listed' }}</p>
+        <p><strong>Release date:</strong> {{ movie.release_date or movie.release_year or 'Not listed' }}</p>
+        {% if movie.runtime %}<p><strong>Duration:</strong> {{ movie.runtime }}{% if movie.runtime is number %} min{% endif %}</p>{% endif %}
+        {% if movie.rating is not none %}<p><strong>TMDB rating:</strong> <span class="movie-rating">★ {{ '%.1f'|format(movie.rating) }}/10</span></p>{% endif %}
+        {% if movie.directors %}<p><strong>Director{{ 's' if movie.directors|length > 1 }}:</strong> {{ movie.directors|join(', ') }}</p>{% endif %}
+        <h2>Story</h2><p class="movie-description">{{ movie.overview }}</p>
+        {% if movie.trailer_url %}<a class="button button-primary" href="{{ movie.trailer_url }}" target="_blank" rel="noopener">Watch trailer</a>{% endif %}
     </div>
 </section>
+
+{% if movie.cast %}
+<section class="cast-section">
+    <h2>Cast</h2>
+    <div class="cast-container">
+        {% for person in movie.cast %}
+            <article class="cast-card">
+                {% if person.photo_url %}<img src="{{ person.photo_url }}" alt="{{ person.name }}" loading="lazy">{% else %}<div class="cast-placeholder">Photo unavailable</div>{% endif %}
+                <h3>{{ person.name }}</h3><p>{{ person.character or 'Cast member' }}</p>
+            </article>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if movie.crew %}
+<section class="cast-section crew-section">
+    <h2>Directors &amp; crew</h2>
+    <div class="crew-list">
+        {% for person in movie.crew %}<article class="crew-card"><strong>{{ person.name }}</strong><span>{{ person.job }}{% if person.department %} · {{ person.department }}{% endif %}</span></article>{% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="reviews-section" id="reviews">
+    <div class="section-heading"><div><p class="small-heading">COMMUNITY</p><h2>Ratings &amp; reviews</h2></div>
+        {% if average_rating is not none %}<p>Community average <strong>{{ '%.1f'|format(average_rating) }}/10</strong></p>{% endif %}
+    </div>
+    {% if current_user.is_authenticated %}
+        <form class="form-card review-form" method="post" action="{{ url_for('main.submit_review', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+            {{ review_form.hidden_tag() }}
+            <input type="hidden" name="movie_title" value="{{ movie.title }}">
+            <p class="form-intro">{{ 'Update your rating or review' if my_review else 'Share your rating and review' }}</p>
+            <div class="form-field">{{ review_form.rating.label }}{{ review_form.rating(min=1, max=10, step=1, required=true) }}{% for error in review_form.rating.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+            <div class="form-field">{{ review_form.review_text.label }}{{ review_form.review_text(rows=4, maxlength=2000, placeholder='What did you think of this movie?') }}{% for error in review_form.review_text.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+            {{ review_form.submit(class_='button button-primary') }}
+        </form>
+    {% else %}
+        <p class="sign-in-prompt"><a href="{{ url_for('main.login') }}">Sign in</a> or <a href="{{ url_for('main.register') }}">create an account</a> to rate and review this movie.</p>
+    {% endif %}
+    <div class="review-list">
+        {% for review in reviews %}
+            <article class="review-card">
+                <div class="review-header"><strong>{{ review.user.username }}</strong><span class="movie-rating">★ {{ review.rating }}/10</span></div>
+                {% if review.review_text %}<p>{{ review.review_text }}</p>{% else %}<p class="muted">Rating only</p>{% endif %}
+                <time datetime="{{ review.updated_at.isoformat() }}">{{ review.updated_at.strftime('%b %d, %Y') }}</time>
+            </article>
+        {% else %}<p class="empty-state">No community reviews yet. Be the first to share a rating.</p>{% endfor %}
+    </div>
+</section>
+{% else %}<section class="movie-details"><p>Movie details are unavailable. Please try again later.</p></section>{% endif %}
 
 {% endblock %}

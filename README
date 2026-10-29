@@ -1,0 +1,25 @@
+## Cineverse
+
+Cineverse is a Flask movie website using SQLite, Flask-Login, Flask-WTF, and TMDB. It has account registration, sign-in, saved user ratings and reviews, popular movies, search, and movie detail pages.
+
+### Start the project in VS Code (PowerShell)
+
+From the `Cineverse` project folder, run:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python run.py
+```
+
+Open `http://127.0.0.1:5000` in your browser. The first command is only needed once.
+
+### Configuration
+
+- Keep the existing `.env` file in the project root. TMDB needs either `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` in that file. Never share it.
+- For stable sign-in sessions across server restarts, add a private `FLASK_SECRET_KEY` value to your existing `.env`. If it is absent, the app generates a temporary key at startup and users will need to sign in again after a restart.
+- The application creates missing user and review tables on startup. It does not reset or replace existing movie data.
+- Python must be able to make HTTPS requests to `api.themoviedb.org`; poster and profile images load from TMDB's image CDN. If TMDB is unavailable, the homepage displays an error and falls back to movies already stored locally.
+
+Run the automated checks with `python -m unittest discover -s tests -v`.

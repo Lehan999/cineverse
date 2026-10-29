@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Something went wrong | Cineverse{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+    <div class="form-card auth-card">
+        <p class="small-heading">CINEVERSE</p>
+        <h1>That request could not be completed</h1>
+        <p>{{ message }}</p>
+        <a class="button button-primary" href="{{ url_for('main.home') }}">Return home</a>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Create account | Cineverse{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+    <form class="form-card auth-card" method="post" novalidate>
+        {{ form.hidden_tag() }}
+        <p class="small-heading">JOIN CINEVERSE</p>
+        <h1>Create your account</h1>
+        <p class="form-intro">Rate movies and keep your reviews in one place.</p>
+        <div class="form-field">{{ form.username.label }}{{ form.username(autocomplete='username', placeholder='3–32 characters') }}{% for error in form.username.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        <div class="form-field">{{ form.email.label }}{{ form.email(type='email', autocomplete='email', placeholder='you@example.com') }}{% for error in form.email.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        <div class="form-field">{{ form.password.label }}{{ form.password(autocomplete='new-password', placeholder='At least 8 characters') }}{% for error in form.password.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        <div class="form-field">{{ form.confirm_password.label }}{{ form.confirm_password(autocomplete='new-password', placeholder='Re-enter your password') }}{% for error in form.confirm_password.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        {{ form.submit(class_='button button-primary button-wide') }}
+        <p class="form-switch">Already registered? <a href="{{ url_for('main.login') }}">Sign in</a></p>
+    </form>
+</section>
+{% endblock %}

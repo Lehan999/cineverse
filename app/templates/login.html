@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in | Cineverse{% endblock %}
+
+{% block content %}
+<section class="auth-page">
+    <form class="form-card auth-card" method="post" novalidate>
+        {{ form.hidden_tag() }}
+        <p class="small-heading">WELCOME BACK</p>
+        <h1>Sign in</h1>
+        <p class="form-intro">Sign in to save your movie ratings and reviews.</p>
+        <div class="form-field">{{ form.identifier.label }}{{ form.identifier(autocomplete='username', placeholder='Username or email') }}{% for error in form.identifier.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        <div class="form-field">{{ form.password.label }}{{ form.password(autocomplete='current-password', placeholder='Password') }}{% for error in form.password.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+        {{ form.submit(class_='button button-primary button-wide') }}
+        <p class="form-switch">New to Cineverse? <a href="{{ url_for('main.register') }}">Create an account</a></p>
+    </form>
+</section>
+{% endblock %}
