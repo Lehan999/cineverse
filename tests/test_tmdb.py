@@ -8,7 +8,7 @@ import requests
 from app.tmdb import TMDBError, movie_details, movie_genres, movies_by_genre, popular_movies, search_movies
 from app import create_app
 from app import db
-from app.models import Movie, Review, User
+from app.models import Favorite, Movie, Review, TMDBCacheEntry, User
 
 
 class TMDBClientTests(unittest.TestCase):
@@ -102,20 +102,84 @@ class FlaskPageTests(unittest.TestCase):
         })
         self.client = self.app.test_client()
 
+    def test_homepage_uses_saved_tmdb_movies_when_network_is_unavailable(self):
+        cached = [{
+            "id": 73, "title": "Saved TMDB Film", "poster_url": "https://image.tmdb.org/t/p/w500/saved.jpg",
+            "genres": ["Drama"], "rating": 7.8, "release_date": "2025-01-02",
+            "overview": "Saved public TMDB movie information.",
+        }]
+        with self.app.app_context():
+            from app.routes import _cache_tmdb_movies
+            _cache_tmdb_movies("popular", cached)
+
+        with patch("app.routes.popular_movies", side_effect=TMDBError("offline")), patch(
+            "app.routes.search_movies", side_effect=TMDBError("offline")
+        ):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Saved TMDB Film", response.data)
+        self.assertIn(b"Saved public TMDB movie information.", response.data)
+        self.assertIn(b"/movie/73?source=tmdb", response.data)
+        with self.app.app_context():
+            self.assertGreaterEqual(TMDBCacheEntry.query.count(), 2)
+
+    @patch("app.routes.movie_details", side_effect=TMDBError("offline"))
+    def test_movie_page_uses_saved_tmdb_details_when_network_is_unavailable(self, details):
+        cached = {
+            "id": 74, "title": "Cached Detail Film", "poster_url": None, "genres": ["Action"],
+            "rating": 8.2, "release_date": "2024-06-01", "release_year": "2024",
+            "overview": "Saved movie description.", "directors": [], "cast": [], "crew": [],
+        }
+        with self.app.app_context():
+            from app.routes import _write_tmdb_cache
+            _write_tmdb_cache("movie:74", cached)
+
+        response = self.client.get("/movie/74?source=tmdb")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Cached Detail Film", response.data)
+        self.assertIn(b"Saved movie description.", response.data)
+        self.assertIn(b"cast and crew may be incomplete", response.data)
+        details.assert_called_once_with(74)
+
     @patch("app.routes.popular_movies")
-    def test_homepage_renders_tmdb_movie(self, popular):
+    @patch("app.routes.search_movies")
+    def test_homepage_rotates_ramayana_and_avengers_doomsday_from_tmdb(self, search, popular):
         popular.return_value = [{
             "id": 42, "title": "Example", "poster_url": "https://image.tmdb.org/t/p/w500/a.jpg",
             "genres": ["Action"], "rating": 8.1, "overview": "A summary",
         }]
+        search.side_effect = [
+            [{
+                "id": 1001, "title": "Ramayana: Rise of a Legend", "poster_url": "https://image.tmdb.org/t/p/w500/ramayana.jpg",
+                "genres": ["Adventure"], "rating": 8.0, "release_date": "2026-11-05",
+                "overview": "Ramayana story overview",
+            }],
+            [{
+                "id": 999, "title": "Avengers: Doomsday",
+                "poster_url": "https://image.tmdb.org/t/p/w500/doomsday.jpg",
+                "genres": ["Action"], "rating": 8.7,
+                "release_date": "2026-12-18", "overview": "TMDB story overview",
+            }],
+        ]
 
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Example", response.data)
+        self.assertIn(b"Featured: <span>Ramayana: Rise of a Legend</span>", response.data)
+        self.assertIn(b"Featured: <span>Avengers: Doomsday</span>", response.data)
+        self.assertIn(b'data-interval="6000"', response.data)
+        self.assertIn(b"TMDB story overview", response.data)
+        self.assertIn(b"/movie/1001?source=tmdb", response.data)
+        self.assertIn(b"/movie/999?source=tmdb", response.data)
         self.assertIn(b"/movie/42", response.data)
         self.assertIn(b'class="movie-container"', response.data)
         self.assertNotIn(b'class="genre-rows"', response.data)
+        self.assertEqual(search.call_count, 2)
+        self.assertEqual(search.call_args_list[0].args, ("Ramayana",))
+        self.assertEqual(search.call_args_list[1].args, ("Avengers: Doomsday",))
 
     @patch("app.routes.movie_details")
     def test_movie_page_renders_director_cast_and_trailer(self, details):
@@ -286,6 +350,44 @@ class AccountAndReviewTests(unittest.TestCase):
             review = Review.query.one()
             self.assertEqual(review.movie_key, "tmdb:42")
             self.assertEqual(review.movie_title, "Remote TMDB Film")
+
+    def test_favorites_require_login_and_can_be_saved_and_removed(self):
+        protected = self.client.get("/favorites")
+        self.assertEqual(protected.status_code, 302)
+        self.register()
+
+        saved = self.client.post("/movie/42/favorite?source=tmdb", data={
+            "movie_title": "Remote TMDB Film",
+            "poster_url": "https://image.tmdb.org/t/p/w500/poster.jpg",
+            "release_date": "2024-01-02",
+        })
+        self.assertEqual(saved.status_code, 302)
+        page = self.client.get("/favorites")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Remote TMDB Film", page.data)
+        with self.app.app_context():
+            favorite = Favorite.query.one()
+            self.assertEqual(favorite.movie_key, "tmdb:42")
+            self.assertEqual(favorite.poster_url, "https://image.tmdb.org/t/p/w500/poster.jpg")
+
+        removed = self.client.post("/movie/42/favorite?source=tmdb")
+        self.assertEqual(removed.status_code, 302)
+        with self.app.app_context():
+            self.assertEqual(Favorite.query.count(), 0)
+
+    def test_favorites_support_local_movies_and_reject_untrusted_posters(self):
+        self.register()
+        self.client.post("/movie/42/favorite?source=tmdb", data={
+            "movie_title": "Remote Film",
+            "poster_url": "https://example.com/untrusted.jpg",
+        })
+        self.client.post("/movie/1/favorite?local=1")
+        with self.app.app_context():
+            remote = Favorite.query.filter_by(movie_key="tmdb:42").one()
+            local = Favorite.query.filter_by(movie_key="local:1").one()
+            self.assertIsNone(remote.poster_url)
+            self.assertEqual(local.movie_title, "Local Film")
+            self.assertTrue(local.is_local_movie)
 
 class CSRFSecurityTests(unittest.TestCase):
     def test_registration_form_token_is_accepted(self):

@@ -44,3 +44,79 @@ themeToggle?.addEventListener("click", () => {
     localStorage.setItem("cineverse-theme", nextTheme);
     updateThemeButton();
 });
+
+const heroCarousel = document.querySelector("[data-hero-carousel]");
+if (heroCarousel) {
+    const slides = Array.from(heroCarousel.querySelectorAll("[data-hero-slide]"));
+    const dots = Array.from(heroCarousel.querySelectorAll("[data-carousel-dot]"));
+    const previousButton = heroCarousel.querySelector("[data-carousel-previous]");
+    const nextButton = heroCarousel.querySelector("[data-carousel-next]");
+    const intervalMs = Math.max(3000, Number(heroCarousel.dataset.interval) || 6000);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let activeIndex = Math.max(0, slides.findIndex((slide) => slide.classList.contains("is-active")));
+    let timer = null;
+
+    function showSlide(nextIndex, direction = 1) {
+        const targetIndex = (nextIndex + slides.length) % slides.length;
+        if (targetIndex === activeIndex) return;
+
+        const oldSlide = slides[activeIndex];
+        oldSlide.classList.remove("is-active", "is-before", "is-after");
+        oldSlide.classList.add(direction > 0 ? "is-before" : "is-after");
+        oldSlide.setAttribute("aria-hidden", "true");
+        oldSlide.inert = true;
+
+        const newSlide = slides[targetIndex];
+        newSlide.classList.remove("is-before", "is-after");
+        newSlide.classList.add("is-active");
+        newSlide.setAttribute("aria-hidden", "false");
+        newSlide.inert = false;
+
+        dots.forEach((dot, index) => {
+            const isActive = index === targetIndex;
+            dot.classList.toggle("is-active", isActive);
+            dot.setAttribute("aria-pressed", String(isActive));
+        });
+        activeIndex = targetIndex;
+    }
+
+    function stopAutoplay() {
+        if (timer !== null) {
+            window.clearInterval(timer);
+            timer = null;
+        }
+    }
+
+    function startAutoplay() {
+        stopAutoplay();
+        if (!reduceMotion.matches && !document.hidden && slides.length > 1) {
+            timer = window.setInterval(() => showSlide(activeIndex + 1, 1), intervalMs);
+        }
+    }
+
+    nextButton?.addEventListener("click", () => {
+        showSlide(activeIndex + 1, 1);
+        startAutoplay();
+    });
+    previousButton?.addEventListener("click", () => {
+        showSlide(activeIndex - 1, -1);
+        startAutoplay();
+    });
+    dots.forEach((dot) => {
+        dot.addEventListener("click", () => {
+            const targetIndex = Number(dot.dataset.carouselDot);
+            showSlide(targetIndex, targetIndex > activeIndex ? 1 : -1);
+            startAutoplay();
+        });
+    });
+
+    heroCarousel.addEventListener("mouseenter", stopAutoplay);
+    heroCarousel.addEventListener("mouseleave", startAutoplay);
+    heroCarousel.addEventListener("focusin", stopAutoplay);
+    heroCarousel.addEventListener("focusout", (event) => {
+        if (!heroCarousel.contains(event.relatedTarget)) startAutoplay();
+    });
+    document.addEventListener("visibilitychange", startAutoplay);
+    reduceMotion.addEventListener?.("change", startAutoplay);
+    startAutoplay();
+}

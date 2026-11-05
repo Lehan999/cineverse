@@ -20,6 +20,8 @@ Open `http://127.0.0.1:5000` in your browser. The first command is only needed o
 - Keep the existing `.env` file in the project root. TMDB needs either `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` in that file. Never share it.
 - For stable sign-in sessions across server restarts, add a private `FLASK_SECRET_KEY` value to your existing `.env`. If it is absent, the app generates a temporary key at startup and users will need to sign in again after a restart.
 - The application creates missing user and review tables on startup. It does not reset or replace existing movie data.
-- Python must be able to make HTTPS requests to `api.themoviedb.org`; poster and profile images load from TMDB's image CDN. If TMDB is unavailable, the homepage displays an error and falls back to movies already stored locally.
+- On a successful TMDB visit, Cineverse saves the latest popular movies, recent searches, and opened movie details in the existing SQLite database. It also saves up to eight poster images per result in `app/static/images/tmdb-cache/`. This lets the homepage, saved searches, and previously opened details keep working on networks that temporarily block TMDB. The cache is filled automatically the first time TMDB works; no sample movies are inserted. Movie cast and crew are available offline only if the detail page was opened successfully before.
+- The app creates the cache table alongside missing tables at startup; existing movie, user, review, and favorite data is preserved. Cached posters are generated files and are excluded from Git.
+- If TMDB is unavailable before any movie data has been cached, connect using a network where TMDB works and open the homepage once. Python still needs HTTPS access to `api.themoviedb.org` for fresh results.
 
 Run the automated checks with `python -m unittest discover -s tests -v`.

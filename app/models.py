@@ -13,6 +13,7 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     reviews = db.relationship("Review", back_populates="user", lazy="select")
+    favorites = db.relationship("Favorite", back_populates="user", lazy="select", cascade="all, delete-orphan")
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -45,6 +46,37 @@ class Review(db.Model):
     @property
     def movie_id(self):
         return int(self.movie_key.partition(":")[2])
+
+
+class Favorite(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "movie_key", name="uq_favorite_user_movie"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    movie_key = db.Column(db.String(64), nullable=False, index=True)
+    movie_title = db.Column(db.String(200), nullable=False)
+    poster_url = db.Column(db.String(500))
+    release_date = db.Column(db.String(32))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    user = db.relationship("User", back_populates="favorites")
+
+    @property
+    def is_local_movie(self):
+        return self.movie_key.startswith("local:")
+
+    @property
+    def movie_id(self):
+        return int(self.movie_key.partition(":")[2])
+
+
+class TMDBCacheEntry(db.Model):
+    """A small, credential-free cache of public TMDB responses for offline viewing."""
+
+    cache_key = db.Column(db.String(200), primary_key=True)
+    payload = db.Column(db.JSON, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class Movie(db.Model):

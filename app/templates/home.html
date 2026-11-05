@@ -6,23 +6,32 @@ Home | Cineverse
 
 {% block content %}
 
-<section class="hero-section">
-    <div class="hero-left">
-        <p class="small-heading">WELCOME TO CINEVERSE</p>
-        {% if featured_movie %}
-            <h1>Featured: <span>{{ featured_movie.title }}</span></h1>
-            <p class="hero-description">{{ featured_movie.overview }}</p>
-            <p class="hero-meta">{% if featured_movie.release_date %}{{ featured_movie.release_date }}{% endif %}{% if featured_movie.rating is not none %} · TMDB ★ {{ '%.1f'|format(featured_movie.rating) }}/10{% endif %}</p>
-            <a class="button button-primary" href="{{ url_for('main.movie', movie_id=featured_movie.id, local=1 if featured_movie.is_local|default(false) else none, source=none if featured_movie.is_local|default(false) else 'tmdb') }}">View movie</a>
-            <a class="button button-light" href="#popular-movies">Browse popular movies</a>
-        {% else %}
+<section class="hero-section{% if featured_movies|length > 1 %} hero-carousel{% endif %}"{% if featured_movies|length > 1 %} data-hero-carousel data-interval="6000" aria-roledescription="carousel" aria-label="Featured movies"{% endif %}>
+    {% if featured_movies %}
+        {% for featured_movie in featured_movies %}
+            <article class="hero-slide{% if loop.first %} is-active{% else %} is-after{% endif %}" data-hero-slide aria-roledescription="slide" aria-label="{{ loop.index }} of {{ loop.length }}" aria-hidden="{{ 'false' if loop.first else 'true' }}"{% if not loop.first %} inert{% endif %}>
+                <div class="hero-left">
+                    <p class="small-heading">WELCOME TO CINEVERSE</p>
+                    <h1>Featured: <span>{{ featured_movie.title }}</span></h1>
+                    <p class="hero-description">{{ featured_movie.overview }}</p>
+                    <p class="hero-meta">{% if featured_movie.release_date %}{{ featured_movie.release_date }}{% endif %}{% if featured_movie.rating is not none %} · TMDB ★ {{ '%.1f'|format(featured_movie.rating) }}/10{% endif %}</p>
+                    <a class="button button-primary" href="{{ url_for('main.movie', movie_id=featured_movie.id, local=1 if featured_movie.is_local|default(false) else none, source=none if featured_movie.is_local|default(false) else 'tmdb') }}">View movie</a>
+                    <a class="button button-light" href="#popular-movies">Browse popular movies</a>
+                </div>
+                {% if featured_movie.poster_url %}<div class="hero-right"><img src="{{ featured_movie.poster_url }}" alt="{{ featured_movie.title }} poster"></div>{% endif %}
+            </article>
+        {% endfor %}
+    {% else %}
+        <div class="hero-left">
+            <p class="small-heading">WELCOME TO CINEVERSE</p>
             <h1>Endless stories,<br><span>Endless entertainment</span></h1>
             <p class="hero-description">Explore movies across every genre.</p>
             <a class="button button-primary" href="#popular-movies">Browse movies</a>
-        {% endif %}
-    </div>
-    {% if featured_movie and featured_movie.poster_url %}<div class="hero-right"><img src="{{ featured_movie.poster_url }}" alt="{{ featured_movie.title }} poster"></div>{% endif %}
+        </div>
+    {% endif %}
 </section>
+
+{% if featured_notice %}<p class="status-message featured-notice" role="status">{{ featured_notice }}</p>{% endif %}
 
 <section class="popular-movies" id="popular-movies">
     <div class="section-heading">

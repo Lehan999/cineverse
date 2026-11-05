@@ -22,6 +22,22 @@
         {% if movie.rating is not none %}<p><strong>TMDB rating:</strong> <span class="movie-rating">★ {{ '%.1f'|format(movie.rating) }}/10</span></p>{% endif %}
         {% if movie.directors %}<p><strong>Director{{ 's' if movie.directors|length > 1 }}:</strong> {{ movie.directors|join(', ') }}</p>{% endif %}
         <h2>Story</h2><p class="movie-description">{{ movie.overview }}</p>
+        {% if current_user.is_authenticated %}
+            <form class="favorite-form" method="post" action="{{ url_for('main.toggle_favorite', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% if not movie.is_local|default(false) %}
+                    <input type="hidden" name="movie_title" value="{{ movie.title }}">
+                    <input type="hidden" name="poster_url" value="{{ movie.poster_url or '' }}">
+                    <input type="hidden" name="release_date" value="{{ movie.release_date or '' }}">
+                {% endif %}
+                <button class="button button-favorite{% if is_favorite %} is-saved{% endif %}" type="submit" aria-pressed="{{ 'true' if is_favorite else 'false' }}">
+                    <span aria-hidden="true">{{ '♥' if is_favorite else '♡' }}</span>
+                    {{ 'Remove from favorites' if is_favorite else 'Add to favorites' }}
+                </button>
+            </form>
+        {% else %}
+            <a class="button button-favorite" href="{{ url_for('main.login', next=url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb')) }}"><span aria-hidden="true">♡</span> Sign in to save</a>
+        {% endif %}
         {% if movie.trailer_url %}<a class="button button-primary" href="{{ movie.trailer_url }}" target="_blank" rel="noopener">Watch trailer</a>{% endif %}
     </div>
 </section>

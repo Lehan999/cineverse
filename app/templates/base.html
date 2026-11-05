@@ -4,7 +4,7 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width,initial-scale=1.0">
         <title>{% block title %}Cineverse{% endblock %}</title>
-        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='9') }}">
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='16') }}">
     </head>
     <body>
         <nav class="navbar">
@@ -13,6 +13,7 @@
                 <li><a href="{{ url_for('main.home') }}">Home</a></li>
                 <li><a href="{{ url_for('main.home') }}#popular-movies">Popular movies</a></li>
                 <li><a href="{{ url_for('main.genres') }}">Genres</a></li>
+                {% if current_user.is_authenticated %}<li><a href="{{ url_for('main.favorites') }}">My favorites</a></li>{% endif %}
                 {% if current_user.is_authenticated %}<li><a href="{{ url_for('main.account') }}">My reviews</a></li>{% endif %}
             </ul>
 
@@ -49,6 +50,6 @@
             <a href="https://www.themoviedb.org" target="_blank" rel="noopener"><img class="tmdb-logo" src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg" alt="TMDB"></a>
             <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
         </footer>
-        <script src="{{ url_for('static', filename='js/main.js', v='3') }}"></script>
+        <script src="{{ url_for('static', filename='js/main.js', v='4') }}"></script>
     </body>
 </html>
