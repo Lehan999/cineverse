@@ -1,72 +1,42 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 import re
+import secrets
+import random
+import csv
+import io
+import uuid
+import hashlib
+import os
+from collections import Counter
+from datetime import date
 from urllib.parse import urlsplit
 
-import requests
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from app import db
 from app.forms import LoginForm, RegistrationForm, ReviewForm
-from app.models import Cast, Crew, Favorite, Movie, Review, TMDBCacheEntry, User
-from app.tmdb import TMDBError, movie_details, movie_genres, movies_by_genre, popular_movies, search_movies
+from app.models import (Cast, CatalogMovie, CineRoom, CineRoomVote, Crew, DuelPreference,
+    Favorite, ImportPreview, Movie, Review, ReviewHistory, ReviewReport, ReviewVote,
+    AuthThrottle, TMDBCacheEntry, User, UserCollection, UserCollectionItem, WatchEntry)
+from app.catalog import as_card, find_local_movies, resolve_catalog_title, safe_artwork_url
 
 main = Blueprint("main", __name__)
 
 
 @main.route("/")
 def home():
-    try:
-        movies = popular_movies()
-        movies = _cache_movie_posters(movies)
-        _cache_tmdb_movies("popular", movies)
-        tmdb_error = None
-    except TMDBError as error:
-        movies = _read_tmdb_cache("popular", []) or _cached_tmdb_movie_pool() or _local_movies()
-        tmdb_error = str(error)
-
-    featured_movies = []
-    notices = []
-    avengers_loaded = False
-    for query, title, preferred_year in (
-        ("Ramayana", "Ramayana", "2026"),
-        ("Avengers: Doomsday", "Avengers: Doomsday", None),
-    ):
-        try:
-            results = search_movies(query)
-            results = _cache_movie_posters(results)
-            _cache_tmdb_movies(f"search:{query.casefold()}", results)
-        except TMDBError:
-            results = _read_tmdb_cache(f"search:{query.casefold()}", [])
-            if not results:
-                results = [movie for movie in _cached_tmdb_movie_pool() if title.casefold() in movie["title"].casefold()]
-            if not results:
-                notices.append(f"{title} could not be loaded from TMDB or saved movie data.")
-                continue
-            notices.append(f"Showing saved TMDB information for {title} while offline.")
-
-        match = _select_featured_result(results, title, preferred_year)
-        if match:
-            featured_movies.append(match)
-            if title == "Avengers: Doomsday":
-                avengers_loaded = True
-        else:
-            notices.append(f"{title} was not found in TMDB search.")
-
-    # Keep the hero useful when either requested movie is unavailable from TMDB.
-    if not avengers_loaded and movies:
-        featured_movies.append(movies[0])
-
+    local_rows = find_local_movies()
+    movies = [as_card(row) for row in local_rows]
+    featured_movies = movies[:1]
     return render_template(
         "home.html",
         movies=movies,
         featured_movies=featured_movies,
-        featured_notice=" ".join(notices) if notices else None,
-        tmdb_error=tmdb_error,
+        featured_notice=None,
+        tmdb_error=None,
     )
 
 
@@ -91,84 +61,27 @@ def _select_featured_result(results, expected_title, preferred_year=None):
 @main.route("/search")
 def search():
     query = request.args.get("q", "").strip()[:100]
-    if not query:
-        return render_template("home.html", movies=[], featured_movies=[], query=query, tmdb_error="Enter a movie title to search.")
-    try:
-        movies = search_movies(query)
-        movies = _cache_movie_posters(movies)
-        _cache_tmdb_movies(f"search:{query.casefold()}", movies)
-        tmdb_error = None
-    except TMDBError as error:
-        movies = _read_tmdb_cache(f"search:{query.casefold()}", [])
-        if not movies:
-            movies = [movie for movie in _cached_tmdb_movie_pool() if query.casefold() in movie["title"].casefold()]
-        if not movies:
-            movies = [movie for movie in _local_movies() if query.casefold() in movie["title"].casefold()]
-        tmdb_error = str(error)
+    movies = [as_card(row) for row in find_local_movies(query)]
     return render_template(
         "home.html",
         movies=movies,
         featured_movies=[movies[0]] if movies else [],
         query=query,
-        tmdb_error=tmdb_error,
+        tmdb_error="No matches in the saved catalog. Provider search is optional and is not called during page loading." if query and not movies else None,
     )
 
 
 @main.get("/genres")
 def genres():
-    selected_id = request.args.get("genre", "").strip()
-    selected_genre = None
-    movies = []
-    genre_rows = []
-    tmdb_error = None
-    genre_list = []
-
-    try:
-        genre_list = movie_genres()
-        genres_by_name = {genre["name"].casefold(): genre for genre in genre_list}
-        if selected_id:
-            selected_genre = next(
-                (genre for genre in genre_list if str(genre["id"]) == selected_id),
-                None,
-            )
-            if selected_genre is None:
-                tmdb_error = "Choose a genre from the list."
-            else:
-                movies = movies_by_genre(selected_genre["id"])
-                genre_rows = [{"name": selected_genre["name"], "movies": movies}]
-        else:
-            shelf_names = ["Action", "Comedy", "Drama", "Adventure"]
-            shelf_genres = [
-                genres_by_name[name.casefold()]
-                for name in shelf_names
-                if name.casefold() in genres_by_name
-            ]
-            results_by_id = {}
-            failures = []
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                requests_by_genre = {
-                    executor.submit(movies_by_genre, genre["id"]): genre
-                    for genre in shelf_genres
-                }
-                for pending in as_completed(requests_by_genre):
-                    genre = requests_by_genre[pending]
-                    try:
-                        results_by_id[genre["id"]] = pending.result()
-                    except TMDBError as error:
-                        failures.append(str(error))
-            genre_rows = [
-                {"name": genre["name"], "movies": results_by_id[genre["id"]]}
-                for genre in shelf_genres
-                if results_by_id.get(genre["id"])
-            ]
-            if failures:
-                tmdb_error = (
-                    "Some movie genres could not be loaded from TMDB."
-                    if genre_rows
-                    else failures[0]
-                )
-    except TMDBError as error:
-        tmdb_error = str(error)
+    selected_genre = request.args.get("genre", "").strip() or None
+    all_movies = [as_card(row) for row in find_local_movies(genre=selected_genre)]
+    genre_names = sorted({genre for movie in CatalogMovie.query.all() for genre in (movie.genres_json or [])})
+    genre_list = [{"id": name, "name": name} for name in genre_names]
+    genre_rows = [{"name": selected_genre, "movies": all_movies}] if selected_genre else [
+        {"name": name, "movies": [as_card(row) for row in find_local_movies(genre=name)]}
+        for name in genre_names if find_local_movies(genre=name)
+    ]
+    movies = all_movies
 
     return render_template(
         "genres.html",
@@ -176,12 +89,441 @@ def genres():
         selected_genre=selected_genre,
         movies=movies,
         genre_rows=genre_rows,
-        tmdb_error=tmdb_error,
+        tmdb_error=None,
     )
+
+
+def _catalog_detail(record):
+    data = as_card(record)
+    data.update({
+        "movie_key": f"catalog:{record.id}", "runtime": record.runtime_minutes,
+        "cast": [{**person, "photo_url": safe_artwork_url(person.get("photo_url"))}
+                 for person in (record.cast_json or []) if isinstance(person, dict)],
+        "crew": [{**person, "photo_url": safe_artwork_url(person.get("photo_url"))}
+                 for person in (record.crew_json or []) if isinstance(person, dict)], "directors": [],
+        "trailer_url": None, "is_catalog": True,
+        "rating_sources": record.ratings_json or {},
+    })
+    data["directors"] = [person.get("name") for person in data["crew"] if person.get("job", "").casefold() == "director"]
+    trailer = record.provenance_json.get("trailer_url") if isinstance(record.provenance_json, dict) else None
+    parsed_trailer = urlsplit(trailer or "")
+    if parsed_trailer.scheme == "https" and parsed_trailer.hostname in {"youtube.com", "www.youtube.com", "youtu.be"}:
+        data["trailer_url"] = trailer
+    return data
+
+
+@main.get("/film/<int:movie_id>")
+def catalog_movie(movie_id):
+    record = db.session.get(CatalogMovie, movie_id)
+    if record is None:
+        abort(404)
+    return _render_movie_page(_catalog_detail(record))
+
+
+@main.post("/film/<int:movie_id>/favorite")
+@login_required
+def catalog_favorite(movie_id):
+    record = db.session.get(CatalogMovie, movie_id)
+    if record is None:
+        abort(404)
+    key = f"catalog:{record.id}"
+    favorite = Favorite.query.filter_by(user_id=current_user.id, movie_key=key).first()
+    if favorite:
+        db.session.delete(favorite)
+    else:
+        db.session.add(Favorite(user_id=current_user.id, movie_key=key, catalog_movie_id=record.id, movie_title=record.title,
+                                poster_url=record.poster_url, release_date=record.release_date or str(record.year or "")))
+    db.session.commit()
+    return redirect(url_for("main.catalog_movie", movie_id=record.id))
+
+
+def _spoiler_blocks(text_value):
+    blocks = []
+    for paragraph in (text_value or "").splitlines():
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        pieces = re.split(r"\[\[spoiler\]\](.*?)\[\[/spoiler\]\]", paragraph, flags=re.I)
+        for index, piece in enumerate(pieces):
+            if piece.strip():
+                blocks.append({"text": piece.strip(), "spoiler": index % 2 == 1})
+    return blocks
+
+
+@main.post("/film/<int:movie_id>/review")
+@login_required
+def catalog_review(movie_id):
+    record = db.session.get(CatalogMovie, movie_id)
+    if record is None:
+        abort(404)
+    form = ReviewForm()
+    if form.validate_on_submit():
+        key = f"catalog:{record.id}"
+        review = Review.query.filter_by(user_id=current_user.id, movie_key=key).first()
+        if review is None:
+            review = Review(user_id=current_user.id, movie_key=key, catalog_movie_id=record.id, movie_title=record.title)
+            db.session.add(review)
+        else:
+            db.session.add(ReviewHistory(review_id=review.id, rating=review.rating, review_text=review.review_text,
+                                         spoiler_paragraphs_json=review.spoiler_paragraphs_json or []))
+        review.movie_title = record.title
+        review.rating = form.rating.data
+        review.review_text = (form.review_text.data or "").strip() or None
+        review.spoiler_paragraphs_json = _spoiler_blocks(review.review_text)
+        db.session.commit()
+    else:
+        flash("Please enter a valid rating from 1 to 10.", "error")
+    return redirect(url_for("main.catalog_movie", movie_id=record.id) + "#reviews")
+
+
+@main.post("/reviews/<int:review_id>/helpful")
+@login_required
+def review_helpful(review_id):
+    review = db.session.get(Review, review_id)
+    if review is None or review.user_id == current_user.id:
+        abort(404)
+    existing = ReviewVote.query.filter_by(user_id=current_user.id, review_id=review_id).first()
+    if existing:
+        db.session.delete(existing)
+    else:
+        db.session.add(ReviewVote(user_id=current_user.id, review_id=review_id))
+    db.session.commit()
+    return redirect(_review_page_url(review))
+
+
+@main.post("/reviews/<int:review_id>/report")
+@login_required
+def report_review(review_id):
+    review = db.session.get(Review, review_id)
+    reason = request.form.get("reason", "").strip()[:240]
+    if review is None or review.user_id == current_user.id or not reason:
+        abort(400)
+    if not ReviewReport.query.filter_by(user_id=current_user.id, review_id=review_id).first():
+        db.session.add(ReviewReport(user_id=current_user.id, review_id=review_id, reason=reason))
+        db.session.commit()
+    flash("Thank you. Your report was recorded for review.", "info")
+    return redirect(_review_page_url(review))
+
+
+def _review_page_url(review):
+    if review.catalog_movie_id:
+        return url_for("main.catalog_movie", movie_id=review.catalog_movie_id) + "#reviews"
+    prefix, _, raw_id = review.movie_key.partition(":")
+    if raw_id.isdigit():
+        return _movie_url(int(raw_id), prefix == "local") + "#reviews"
+    return url_for("main.home")
+
+
+@main.route("/moderation", methods=["GET", "POST"])
+@login_required
+def moderation_queue():
+    moderator_ids = {int(value.strip()) for value in os.getenv("CINEVERSE_MODERATOR_IDS", "").split(",") if value.strip().isdigit()}
+    if current_user.id not in moderator_ids:
+        abort(403)
+    if request.method == "POST":
+        report = db.session.get(ReviewReport, request.form.get("report_id", type=int))
+        if report is None:
+            abort(404)
+        review = db.session.get(Review, report.review_id)
+        action = request.form.get("action")
+        if action == "hide":
+            review.is_hidden = True
+        elif action == "restore":
+            review.is_hidden = False
+        else:
+            abort(400)
+        report.status = "reviewed"
+        db.session.commit()
+        flash("Moderation action saved.", "success")
+        return redirect(url_for("main.moderation_queue"))
+    reports = ReviewReport.query.order_by(ReviewReport.created_at.desc()).all()
+    return render_template("moderation.html", reports=reports)
+
+
+@main.post("/film/<int:movie_id>/watch")
+@login_required
+def watch_movie(movie_id):
+    record = db.session.get(CatalogMovie, movie_id)
+    if record is None:
+        abort(404)
+    status = request.form.get("status", "watchlist")
+    if status not in {"watchlist", "watched"}:
+        abort(400)
+    entry = WatchEntry.query.filter_by(user_id=current_user.id, movie_id=movie_id).first()
+    if entry is None:
+        entry = WatchEntry(user_id=current_user.id, movie_id=movie_id)
+        db.session.add(entry)
+    entry.status = status
+    entry.private_note = request.form.get("private_note", "").strip()[:2000] or None
+    entry.watched_on = datetime.now().date() if status == "watched" else None
+    db.session.commit()
+    return redirect(url_for("main.catalog_movie", movie_id=movie_id))
+
+
+@main.route("/cine-match", methods=["GET", "POST"])
+def cine_match():
+    mood = request.values.get("mood", "").strip().casefold()
+    language = request.values.get("language", "").strip().casefold()
+    genre = request.values.get("genre", "").strip()
+    runtime = request.values.get("time", "any")
+    watched_ids = {row.movie_id for row in WatchEntry.query.filter_by(user_id=current_user.id).all()} if current_user.is_authenticated else set()
+    candidates = CatalogMovie.query.all()
+    ranked = []
+    for movie in candidates:
+        tags = [str(value).casefold() for value in (movie.mood_tags_json or [])]
+        genres = [str(value).casefold() for value in (movie.genres_json or [])]
+        if mood and mood not in tags:
+            continue
+        if genre and genre.casefold() not in genres:
+            continue
+        if language and language != "any" and language != (movie.language or "").casefold():
+            continue
+        if runtime == "short" and movie.runtime_minutes and movie.runtime_minutes > 100:
+            continue
+        if runtime == "medium" and movie.runtime_minutes and not 90 <= movie.runtime_minutes <= 150:
+            continue
+        if runtime == "long" and movie.runtime_minutes and movie.runtime_minutes < 140:
+            continue
+        score = (4 if mood and mood in tags else 0) + (3 if genre and genre.casefold() in genres else 0)
+        score += 2 if language and language == (movie.language or "").casefold() else 0
+        score += 1 if movie.id not in watched_ids else -3
+        ranked.append((score, movie))
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].title.casefold()))
+    results = [{"movie": as_card(movie), "why": "Matches your chosen " + ", ".join(x for x in (mood or None, genre or None, language if language not in ("", "any") else None) if x)} for score, movie in ranked[:3]] if request.method == "POST" else []
+    return render_template("cine_match.html", results=results, mood=mood, language=language, genre=genre, genres=sorted({g for item in candidates for g in (item.genres_json or [])}))
+
+
+@main.get("/roulette")
+def roulette():
+    movies = CatalogMovie.query.all()
+    watched = {row.movie_id for row in WatchEntry.query.filter_by(user_id=current_user.id, status="watched").all()} if current_user.is_authenticated else set()
+    pool = [item for item in movies if item.id not in watched] or movies
+    selected = random.choice(pool) if pool else None
+    return render_template("roulette.html", movie=as_card(selected) if selected else None)
+
+
+@main.route("/cine-duel", methods=["GET", "POST"])
+@login_required
+def cine_duel():
+    movies = CatalogMovie.query.order_by(CatalogMovie.title).all()
+    if request.method == "POST":
+        try:
+            winner_id, loser_id = int(request.form.get("winner")), int(request.form.get("loser"))
+        except (TypeError, ValueError):
+            abort(400)
+        if winner_id == loser_id or not db.session.get(CatalogMovie, winner_id) or not db.session.get(CatalogMovie, loser_id):
+            abort(400)
+        db.session.add(DuelPreference(user_id=current_user.id, winner_movie_id=winner_id, loser_movie_id=loser_id))
+        db.session.commit()
+        flash("Preference saved. Your future CineMatch suggestions can use it.", "success")
+        return redirect(url_for("main.cine_duel"))
+    return render_template("cine_duel.html", pair=movies[:2] if len(movies) >= 2 else [])
+
+
+@main.get("/cinema-dna")
+@login_required
+def cinema_dna():
+    watches = WatchEntry.query.filter_by(user_id=current_user.id).all()
+    reviews = Review.query.filter_by(user_id=current_user.id).all()
+    rated_keys = {review.movie_key for review in reviews}
+    ids = {entry.movie_id for entry in watches}
+    ids |= {int(review.movie_key.split(":", 1)[1]) for review in reviews if review.movie_key.startswith("catalog:") and review.movie_key.split(":", 1)[1].isdigit()}
+    films = CatalogMovie.query.filter(CatalogMovie.id.in_(ids)).all() if ids else []
+    genres = Counter(g for movie in films for g in (movie.genres_json or []))
+    languages = Counter(movie.language for movie in films if movie.language)
+    return render_template("cinema_dna.html", genres=genres.most_common(), languages=languages.most_common(), reviews=reviews,
+                           average=sum(review.rating for review in reviews) / len(reviews) if reviews else None,
+                           watched=sum(1 for entry in watches if entry.status == "watched"), saved=sum(1 for entry in watches if entry.status == "watchlist"),
+                           has_activity=bool(watches or reviews or rated_keys))
+
+
+@main.route("/cine-room", methods=["GET", "POST"])
+@login_required
+def cine_room_create():
+    if request.method == "POST":
+        room = CineRoom(code=secrets.token_urlsafe(6).replace("-", "").replace("_", "")[:8].upper(), owner_id=current_user.id)
+        db.session.add(room)
+        db.session.commit()
+        return redirect(url_for("main.cine_room", code=room.code))
+    return render_template("cine_room_create.html")
+
+
+@main.route("/cine-room/<string:code>", methods=["GET", "POST"])
+def cine_room(code):
+    room = CineRoom.query.filter_by(code=code.upper()).first_or_404()
+    token_key = f"room:{room.code}"
+    if token_key not in session:
+        session[token_key] = secrets.token_urlsafe(24)
+    if request.method == "POST":
+        if request.form.get("action") == "reveal":
+            if not current_user.is_authenticated or current_user.id != room.owner_id:
+                abort(403)
+            room.is_revealed = True
+            db.session.commit()
+            return redirect(url_for("main.cine_room", code=room.code))
+        try:
+            movie_id = int(request.form.get("movie_id"))
+        except (TypeError, ValueError):
+            abort(400)
+        if db.session.get(CatalogMovie, movie_id) is None:
+            abort(400)
+        vote = CineRoomVote.query.filter_by(room_id=room.id, voter_token=session[token_key]).first()
+        if vote is None:
+            db.session.add(CineRoomVote(room_id=room.id, voter_token=session[token_key], movie_id=movie_id))
+        else:
+            vote.movie_id = movie_id
+        db.session.commit()
+        flash("Your vote is private and saved.", "success")
+    counts = db.session.query(CineRoomVote.movie_id, func.count(CineRoomVote.id)).filter_by(room_id=room.id).group_by(CineRoomVote.movie_id).all()
+    result_ids = [movie_id for movie_id, count in counts if count == max([value for _, value in counts], default=0)] if counts else []
+    result = CatalogMovie.query.filter(CatalogMovie.id.in_(result_ids)).all() if result_ids and room.is_revealed else []
+    return render_template("cine_room.html", room=room, movies=CatalogMovie.query.order_by(CatalogMovie.title).all(), result=result,
+                           vote_count=sum(count for _, count in counts) if room.is_revealed else None,
+                           voted=bool(CineRoomVote.query.filter_by(room_id=room.id, voter_token=session[token_key]).first()),
+                           is_room_owner=current_user.is_authenticated and current_user.id == room.owner_id)
+
+
+@main.route("/lists", methods=["GET", "POST"])
+@login_required
+def user_lists():
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()[:80]
+        description = request.form.get("description", "").strip()[:300]
+        if not title:
+            flash("List name is required.", "error")
+        elif UserCollection.query.filter_by(user_id=current_user.id, title=title).first():
+            flash("You already have a list with that name.", "error")
+        else:
+            db.session.add(UserCollection(user_id=current_user.id, title=title, description=description or None))
+            db.session.commit()
+            flash("List created.", "success")
+            return redirect(url_for("main.user_lists"))
+    collections = UserCollection.query.filter_by(user_id=current_user.id).order_by(UserCollection.created_at.desc()).all()
+    return render_template("lists.html", collections=collections)
+
+
+@main.post("/lists/<int:list_id>/add/<int:movie_id>")
+@login_required
+def add_to_list(list_id, movie_id):
+    collection = UserCollection.query.filter_by(id=list_id, user_id=current_user.id).first_or_404()
+    if db.session.get(CatalogMovie, movie_id) is None:
+        abort(404)
+    if not UserCollectionItem.query.filter_by(collection_id=list_id, movie_id=movie_id).first():
+        db.session.add(UserCollectionItem(collection_id=list_id, movie_id=movie_id))
+        db.session.commit()
+    return redirect(url_for("main.user_lists"))
+
+
+@main.get("/data-export.csv")
+@login_required
+def data_export():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["movie_key", "title", "rating", "review", "watch_status", "watched_on", "private_note"])
+    for review in Review.query.filter_by(user_id=current_user.id).all():
+        entry = WatchEntry.query.filter_by(user_id=current_user.id, movie_id=int(review.movie_key.split(":", 1)[1])).first() if review.movie_key.startswith("catalog:") and review.movie_key.split(":", 1)[1].isdigit() else None
+        writer.writerow([review.movie_key, review.movie_title, review.rating, review.review_text or "", entry.status if entry else "", entry.watched_on.isoformat() if entry and entry.watched_on else "", entry.private_note if entry else ""])
+    response = current_app.response_class(output.getvalue(), mimetype="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=cineverse-personal-data.csv"
+    return response
+
+
+@main.route("/data-import", methods=["GET", "POST"])
+@login_required
+def data_import():
+    preview = None
+    if request.method == "POST" and request.form.get("undo_id"):
+        preview = ImportPreview.query.filter_by(id=request.form["undo_id"], user_id=current_user.id).first_or_404()
+        for entry_id in preview.imported_watch_ids_json or []:
+            entry = WatchEntry.query.filter_by(id=entry_id, user_id=current_user.id).first()
+            if entry:
+                db.session.delete(entry)
+        preview.imported_watch_ids_json = []
+        db.session.commit()
+        flash("Imported entries were undone.", "success")
+        return redirect(url_for("main.data_import"))
+    if request.method == "POST" and request.form.get("preview_id"):
+        preview = ImportPreview.query.filter_by(id=request.form["preview_id"], user_id=current_user.id).first_or_404()
+        if request.form.get("confirm") == "yes":
+            inserted = []
+            for row in preview.rows_json:
+                if row.get("status") != "matched":
+                    continue
+                movie_id = row["movie_id"]
+                if WatchEntry.query.filter_by(user_id=current_user.id, movie_id=movie_id).first():
+                    continue
+                entry = WatchEntry(user_id=current_user.id, movie_id=movie_id, status=row.get("status_import", "watchlist"))
+                db.session.add(entry)
+                db.session.flush()
+                inserted.append(entry.id)
+            preview.imported_watch_ids_json = inserted
+            db.session.commit()
+            flash(f"Imported {len(inserted)} new watchlist entries. You can undo this import.", "success")
+            return redirect(url_for("main.data_import"))
+    elif request.method == "POST":
+        upload = request.files.get("file")
+        if not upload or not upload.filename.casefold().endswith(".csv"):
+            flash("Choose a CSV file.", "error")
+        else:
+            try:
+                text_value = upload.stream.read(1024 * 1024 + 1).decode("utf-8-sig")
+                if len(text_value) > 1024 * 1024:
+                    raise ValueError("File is over the 1 MB limit.")
+                reader = csv.DictReader(io.StringIO(text_value))
+                if not reader.fieldnames or not any(name and name.casefold() == "title" for name in reader.fieldnames):
+                    raise ValueError("CSV needs a title column.")
+                rows = []
+                catalog = CatalogMovie.query.all()
+                for index, source_row in enumerate(reader):
+                    if index >= 100:
+                        raise ValueError("Only the first 100 rows can be imported at a time.")
+                    source_row = {str(key).casefold().strip(): (value or "").strip() for key, value in source_row.items() if key}
+                    title = source_row.get("title", "")[:240]
+                    year_value = source_row.get("year", "")[:4]
+                    match_status, matched_movie = resolve_catalog_title(catalog, title, year_value or None)
+                    if match_status == "matched" and WatchEntry.query.filter_by(user_id=current_user.id, movie_id=matched_movie.id).first():
+                        match_status = "duplicate"
+                    rows.append({"row": index + 2, "title": title, "year": year_value,
+                                 "status": match_status,
+                                 "movie_id": matched_movie.id if match_status == "matched" and matched_movie else None,
+                                 "status_import": "watched" if source_row.get("watched", "").casefold() in ("1", "true", "yes", "watched") else "watchlist"})
+                preview = ImportPreview(id=str(uuid.uuid4()), user_id=current_user.id, rows_json=rows)
+                db.session.add(preview)
+                db.session.commit()
+            except (UnicodeDecodeError, csv.Error, ValueError) as error:
+                db.session.rollback()
+                flash(str(error)[:200], "error")
+    pending = ImportPreview.query.filter_by(user_id=current_user.id).order_by(ImportPreview.created_at.desc()).first()
+    if preview is None:
+        preview = pending
+    return render_template("data_import.html", preview=preview)
 
 
 @main.route("/movie/<int:movie_id>")
 def movie(movie_id):
+    if request.args.get("source") == "catalog":
+        return redirect(url_for("main.catalog_movie", movie_id=movie_id))
+    if request.args.get("source") == "tmdb":
+        legacy_catalog = CatalogMovie.query.filter_by(source="tmdb-legacy", external_id=str(movie_id)).first()
+        if legacy_catalog:
+            return _render_movie_page(_catalog_detail(legacy_catalog))
+        data = _read_tmdb_cache(f"movie:{movie_id}")
+        if data:
+            data["poster_url"] = safe_artwork_url(data.get("poster_url"))
+            for person_list in (data.get("cast", []), data.get("crew", [])):
+                for person in person_list:
+                    if isinstance(person, dict):
+                        person["photo_url"] = safe_artwork_url(person.get("photo_url"))
+            trailer = urlsplit(data.get("trailer_url") or "")
+            if not (trailer.scheme == "https" and trailer.hostname in {"youtube.com", "www.youtube.com", "youtu.be"}):
+                data["trailer_url"] = None
+            data["movie_key"] = f"tmdb:{movie_id}"
+            data.setdefault("cast", [])
+            data.setdefault("directors", [])
+            data.setdefault("crew", [])
+            data.setdefault("trailer_url", None)
+            return _render_movie_page(data, tmdb_error="Showing preserved movie information from the legacy cache.")
+        return render_template("movie.html", movie=None, tmdb_error="This legacy movie was not saved locally. Provider access is disabled on this page."), 404
     if request.args.get("local") == "1":
         local_movie = db.session.get(Movie, movie_id)
         if local_movie is None:
@@ -194,22 +536,7 @@ def movie(movie_id):
         if local_movie is not None:
             return _render_movie_page(_local_movie_details(local_movie))
 
-    try:
-        data = movie_details(movie_id)
-        data["poster_url"] = _cache_movie_posters([data])[0].get("poster_url")
-        data["movie_key"] = f"tmdb:{movie_id}"
-        _write_tmdb_cache(f"movie:{movie_id}", data)
-        return _render_movie_page(data)
-    except TMDBError as error:
-        data = _read_tmdb_cache(f"movie:{movie_id}")
-        if data:
-            data["movie_key"] = f"tmdb:{movie_id}"
-            data.setdefault("cast", [])
-            data.setdefault("directors", [])
-            data.setdefault("crew", [])
-            data.setdefault("trailer_url", None)
-            return _render_movie_page(data, tmdb_error=f"TMDB is unavailable. Showing saved movie information; cast and crew may be incomplete. {error}")
-        return render_template("movie.html", movie=None, tmdb_error=str(error)), 503
+    return render_template("movie.html", movie=None, tmdb_error="This movie is not in the local catalog."), 404
 
 
 @main.route("/register", methods=["GET", "POST"])
@@ -248,12 +575,30 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
         identity = form.identifier.data.strip().casefold()
+        bucket = hashlib.sha256(f"{current_app.config['SECRET_KEY']}|{request.remote_addr or 'unknown'}".encode()).hexdigest()
+        throttle = db.session.get(AuthThrottle, bucket)
+        now = datetime.now(timezone.utc)
+        if throttle and (now - (throttle.window_started.replace(tzinfo=timezone.utc) if throttle.window_started.tzinfo is None else throttle.window_started)).total_seconds() < 900 and throttle.attempts >= 8:
+            flash("Too many sign-in attempts. Wait 15 minutes and try again.", "error")
+            return render_template("login.html", form=form), 429
         user = User.query.filter(
             (func.lower(User.username) == identity) | (func.lower(User.email) == identity)
         ).first()
         if user is None or not user.check_password(form.password.data):
+            if throttle is None:
+                throttle = AuthThrottle(key_hash=bucket, attempts=1, window_started=now)
+                db.session.add(throttle)
+            elif (now - (throttle.window_started.replace(tzinfo=timezone.utc) if throttle.window_started.tzinfo is None else throttle.window_started)).total_seconds() >= 900:
+                throttle.attempts = 1
+                throttle.window_started = now
+            else:
+                throttle.attempts += 1
+            db.session.commit()
             flash("The username/email or password is incorrect.", "error")
         else:
+            if throttle:
+                db.session.delete(throttle)
+                db.session.commit()
             login_user(user)
             flash(f"Welcome back, {user.username}.", "success")
             next_url = request.args.get("next", "")
@@ -286,6 +631,14 @@ def favorites():
     return render_template("favorites.html", favorites=saved_movies)
 
 
+@main.get("/watchlist")
+@login_required
+def watchlist():
+    entries = WatchEntry.query.filter_by(user_id=current_user.id).order_by(WatchEntry.status.asc(), WatchEntry.id.desc()).all()
+    movies_by_id = {movie.id: movie for movie in CatalogMovie.query.filter(CatalogMovie.id.in_([entry.movie_id for entry in entries])).all()} if entries else {}
+    return render_template("watchlist.html", entries=entries, movies_by_id=movies_by_id)
+
+
 @main.post("/movie/<int:movie_id>/favorite")
 @login_required
 def toggle_favorite(movie_id):
@@ -309,12 +662,12 @@ def toggle_favorite(movie_id):
             poster_url = data["poster_url"]
             release_date = data["release_date"]
         else:
-            title = request.form.get("movie_title", "").strip()[:200]
-            if not title:
-                flash("Open the movie details page and try saving it again.", "error")
-                return redirect(_movie_url(movie_id, False))
-            poster_url = _validated_tmdb_poster(request.form.get("poster_url", ""))
-            release_date = request.form.get("release_date", "").strip()[:32]
+            record = CatalogMovie.query.filter_by(source="tmdb-legacy", external_id=str(movie_id)).first()
+            if record is None:
+                abort(404)
+            title = record.title
+            poster_url = record.poster_url if record.poster_url and record.poster_url.startswith("/static/") else _validated_tmdb_poster(record.poster_url or "")
+            release_date = record.release_date or str(record.year or "")
 
         db.session.add(Favorite(
             user_id=current_user.id,
@@ -322,6 +675,7 @@ def toggle_favorite(movie_id):
             movie_title=title,
             poster_url=poster_url,
             release_date=release_date,
+            catalog_movie_id=record.id if not is_local else None,
         ))
         try:
             db.session.commit()
@@ -344,9 +698,12 @@ def submit_review(movie_id):
             abort(404)
         data = _local_movie_details(local_movie)
     elif request.args.get("source") == "tmdb":
+        record = CatalogMovie.query.filter_by(source="tmdb-legacy", external_id=str(movie_id)).first()
+        if record is None:
+            abort(404)
         data = {
-            "movie_key": f"tmdb:{movie_id}",
-            "title": request.form.get("movie_title", f"TMDB movie {movie_id}").strip()[:200],
+            "movie_key": f"tmdb:{movie_id}", "catalog_movie_id": record.id,
+            "title": record.title,
         }
     else:
         local_movie = db.session.get(Movie, movie_id)
@@ -362,11 +719,15 @@ def submit_review(movie_id):
     else:
         review = Review.query.filter_by(user_id=current_user.id, movie_key=data["movie_key"]).first()
         if review is None:
-            review = Review(user_id=current_user.id, movie_key=data["movie_key"])
+            review = Review(user_id=current_user.id, movie_key=data["movie_key"], catalog_movie_id=data.get("catalog_movie_id"))
             db.session.add(review)
+        else:
+            db.session.add(ReviewHistory(review_id=review.id, rating=review.rating, review_text=review.review_text,
+                                         spoiler_paragraphs_json=review.spoiler_paragraphs_json or []))
         review.movie_title = data.get("title", f"Movie {movie_id}")
         review.rating = form.rating.data
         review.review_text = (form.review_text.data or "").strip() or None
+        review.spoiler_paragraphs_json = _spoiler_blocks(review.review_text)
         try:
             db.session.commit()
         except IntegrityError:
@@ -380,13 +741,25 @@ def submit_review(movie_id):
 
 def _render_movie_page(data, tmdb_error=None, status=200):
     movie_key = data["movie_key"]
-    reviews = Review.query.filter_by(movie_key=movie_key).order_by(Review.updated_at.desc()).all()
-    average_rating = db.session.query(func.avg(Review.rating)).filter_by(movie_key=movie_key).scalar()
+    review_filter = Review.movie_key == movie_key
+    favorite_filter = Favorite.movie_key == movie_key
+    if data.get("is_catalog"):
+        review_filter = or_(review_filter, Review.catalog_movie_id == data["id"])
+        favorite_filter = or_(favorite_filter, Favorite.catalog_movie_id == data["id"])
+    review_query = Review.query.filter(review_filter)
+    if current_user.is_authenticated:
+        review_query = review_query.filter(or_(Review.is_hidden.is_(False), Review.user_id == current_user.id))
+    else:
+        review_query = review_query.filter(Review.is_hidden.is_(False))
+    reviews = review_query.order_by(Review.updated_at.desc()).all()
+    if request.args.get("sort") == "helpful":
+        reviews.sort(key=lambda item: (-item.helpful_votes, item.updated_at), reverse=False)
+    average_rating = db.session.query(func.avg(Review.rating)).filter(review_filter).scalar()
     my_review = None
     is_favorite = False
     if current_user.is_authenticated:
-        my_review = Review.query.filter_by(movie_key=movie_key, user_id=current_user.id).first()
-        is_favorite = Favorite.query.filter_by(movie_key=movie_key, user_id=current_user.id).first() is not None
+        my_review = Review.query.filter(review_filter, Review.user_id == current_user.id).order_by(Review.updated_at.desc()).first()
+        is_favorite = Favorite.query.filter(favorite_filter, Favorite.user_id == current_user.id).first() is not None
     form = ReviewForm(data={"rating": my_review.rating, "review_text": my_review.review_text or ""}) if my_review else ReviewForm()
     return render_template(
         "movie.html",
@@ -396,6 +769,7 @@ def _render_movie_page(data, tmdb_error=None, status=200):
         review_form=form,
         my_review=my_review,
         is_favorite=is_favorite,
+        collections=UserCollection.query.filter_by(user_id=current_user.id).all() if current_user.is_authenticated else [],
         tmdb_error=tmdb_error,
     ), status
 
@@ -419,60 +793,6 @@ def _movie_url(movie_id, is_local):
 def _read_tmdb_cache(cache_key, default=None):
     entry = db.session.get(TMDBCacheEntry, cache_key)
     return entry.payload if entry is not None else default
-
-
-def _cache_movie_posters(movies):
-    """Save a few real TMDB posters locally so cached movies remain visual offline."""
-    saved_movies = [dict(movie) for movie in movies]
-    if current_app.testing:
-        return saved_movies
-
-    poster_directory = Path(current_app.static_folder) / "images" / "tmdb-cache"
-    downloads = []
-    for movie in saved_movies[:8]:
-        movie_id = movie.get("id")
-        poster_url = movie.get("poster_url")
-        if not isinstance(movie_id, int) or not poster_url:
-            continue
-        filename = f"movie-{movie_id}.jpg"
-        poster_path = poster_directory / filename
-        if poster_path.is_file():
-            movie["poster_url"] = url_for("static", filename=f"images/tmdb-cache/{filename}")
-            continue
-        parsed = urlsplit(poster_url)
-        if parsed.scheme == "https" and parsed.netloc == "image.tmdb.org" and parsed.path.startswith("/t/p/"):
-            downloads.append((movie, poster_url, poster_path, filename))
-
-    def download_poster(item):
-        _, poster_url, poster_path, filename = item
-        try:
-            with requests.get(poster_url, timeout=(2, 4), stream=True) as response:
-                response.raise_for_status()
-                if urlsplit(response.url).netloc != "image.tmdb.org":
-                    return None
-                if not response.headers.get("content-type", "").startswith("image/"):
-                    return None
-                body = bytearray()
-                for chunk in response.iter_content(64 * 1024):
-                    body.extend(chunk)
-                    if len(body) > 4 * 1024 * 1024:
-                        return None
-            if not body:
-                return None
-            poster_path.parent.mkdir(parents=True, exist_ok=True)
-            poster_path.write_bytes(body)
-            return filename
-        except (requests.RequestException, OSError):
-            return None
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = [executor.submit(download_poster, item) for item in downloads]
-        for future in as_completed(results):
-            filename = future.result()
-            if filename:
-                movie = next(item[0] for item in downloads if item[3] == filename)
-                movie["poster_url"] = url_for("static", filename=f"images/tmdb-cache/{filename}")
-    return saved_movies
 
 
 def _write_tmdb_cache(cache_key, payload):

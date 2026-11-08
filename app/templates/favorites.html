@@ -14,13 +14,13 @@
         <div class="favorites-grid">
             {% for favorite in favorites %}
                 <article class="favorite-card">
-                    <a class="favorite-poster-link" href="{{ url_for('main.movie', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">
+                    <a class="favorite-poster-link" href="{{ url_for('main.catalog_movie', movie_id=favorite.movie_id) if favorite.is_catalog_movie else url_for('main.movie', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">
                         {% if favorite.poster_url %}<img src="{{ favorite.poster_url }}" alt="{{ favorite.movie_title }} poster" loading="lazy">{% else %}<div class="poster-placeholder">Poster unavailable</div>{% endif %}
                     </a>
                     <div class="favorite-card-content">
-                        <h2><a href="{{ url_for('main.movie', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">{{ favorite.movie_title }}</a></h2>
+                        <h2><a href="{{ url_for('main.catalog_movie', movie_id=favorite.movie_id) if favorite.is_catalog_movie else url_for('main.movie', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">{{ favorite.movie_title }}</a></h2>
                         {% if favorite.release_date %}<p>{{ favorite.release_date }}</p>{% endif %}
-                        <form method="post" action="{{ url_for('main.toggle_favorite', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">
+                        <form method="post" action="{{ url_for('main.catalog_favorite', movie_id=favorite.movie_id) if favorite.is_catalog_movie else url_for('main.toggle_favorite', movie_id=favorite.movie_id, local=1 if favorite.is_local_movie else none, source=none if favorite.is_local_movie else 'tmdb') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="button button-favorite is-saved" type="submit"><span aria-hidden="true">♥</span> Remove</button>
                         </form>

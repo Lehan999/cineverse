@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
 {% macro movie_card(movie) -%}
-<a class="movie-link" href="{{ url_for('main.movie', movie_id=movie.id, source='tmdb') }}">
+<a class="movie-link" href="{{ url_for('main.catalog_movie', movie_id=movie.id) }}">
     <article class="movie-card">
         {% if movie.poster_url %}<img src="{{ movie.poster_url }}" alt="{{ movie.title }} poster" loading="lazy">{% else %}<div class="poster-placeholder">Poster unavailable</div>{% endif %}
         <div class="movie-card-content">
             <h3>{{ movie.title }}</h3>
-            {% if movie.rating is not none %}<p class="movie-rating">TMDB ★ {{ '%.1f'|format(movie.rating) }}</p>{% endif %}
+            {% if movie.rating is not none %}<p class="movie-rating">{{ movie.rating_source|default('Provider') }} ★ {{ '%.1f'|format(movie.rating) }}/10</p>{% endif %}
             {% if movie.release_date %}<p class="movie-date">{{ movie.release_date }}</p>{% endif %}
             {% if movie.overview %}<p class="movie-overview">{{ movie.overview }}</p>{% endif %}
         </div>
@@ -21,7 +21,7 @@
     <header class="genre-intro">
         <p class="small-heading">FIND YOUR NEXT FAVORITE</p>
         <h1>Browse by genre</h1>
-        <p>Explore popular movies from TMDB, grouped by the kind of story you’re in the mood for.</p>
+            <p>Browse the saved Cineverse catalog by story type. This page works when metadata providers are offline.</p>
     </header>
 
     {% if tmdb_error %}
@@ -32,7 +32,7 @@
         <nav class="genre-list" aria-label="Movie genres">
             <a class="genre-chip{% if not selected_genre %} active{% endif %}" href="{{ url_for('main.genres') }}">All genres</a>
             {% for genre in genres %}
-                <a class="genre-chip{% if selected_genre and selected_genre.id == genre.id %} active{% endif %}"
+                <a class="genre-chip{% if selected_genre and selected_genre == genre.id %} active{% endif %}"
                    href="{{ url_for('main.genres', genre=genre.id) }}">{{ genre.name }}</a>
             {% endfor %}
         </nav>
@@ -51,7 +51,7 @@
                             {% for movie in row.movies %}{{ movie_card(movie) }}{% endfor %}
                         </div>
                     {% else %}
-                        <p class="empty-state">TMDB did not return movies for this genre right now.</p>
+                        <p class="empty-state">No saved catalog titles are tagged with this genre yet.</p>
                     {% endif %}
                 </section>
             {% endfor %}
@@ -61,7 +61,7 @@
             <span class="genre-hint-icon" aria-hidden="true">✦</span>
             <div>
                 <h2>{% if selected_genre %}No movies available{% else %}No genre rows loaded{% endif %}</h2>
-                <p>{% if selected_genre %}TMDB did not return movies for this genre right now.{% else %}Choose a genre above or try again when TMDB is available.{% endif %}</p>
+                <p>{% if selected_genre %}No saved catalog titles are tagged with this genre yet.{% else %}Choose a genre above or add titles to your local catalog.{% endif %}</p>
             </div>
         </section>
     {% endif %}

@@ -7,3 +7,7 @@ __pycache__/
 venv/
 .test-deps/
 app/static/images/tmdb-cache/
+instance/*.db
+instance/*.sqlite*
+instance/backups/
+*.sqlite3

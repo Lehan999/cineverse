@@ -1,10 +1,10 @@
-## Cineverse
+# Cineverse
 
-Cineverse is a Flask movie website using SQLite, Flask-Login, Flask-WTF, and TMDB. It has account registration, sign-in, saved user ratings and reviews, popular movies, search, and movie detail pages.
+Cineverse is a Flask movie-discovery and personal movie journal. The homepage, search, genres and recommendation screens read a local SQLite catalog, so they continue to work when a metadata API is unavailable. Optional providers enrich that catalog only through an explicit maintenance command.
 
-### Start the project in VS Code (PowerShell)
+## Start on Windows
 
-From the `Cineverse` project folder, run:
+Open PowerShell in this project directory (`C:\Projects\Cineverse`) and run:
 
 ```powershell
 python -m venv .venv
@@ -13,15 +13,61 @@ python -m pip install -r requirements.txt
 python run.py
 ```
 
-Open `http://127.0.0.1:5000` in your browser. The first command is only needed once.
+If the virtual environment already exists, activate it and run `python run.py`. The launcher opens a browser on the first free port from **5001 to 5010** and prints the URL. Stop it with `Ctrl+C`.
 
-### Configuration
+## Data and providers
 
-- Keep the existing `.env` file in the project root. TMDB needs either `TMDB_API_KEY` or `TMDB_READ_ACCESS_TOKEN` in that file. Never share it.
-- For stable sign-in sessions across server restarts, add a private `FLASK_SECRET_KEY` value to your existing `.env`. If it is absent, the app generates a temporary key at startup and users will need to sign in again after a restart.
-- The application creates missing user and review tables on startup. It does not reset or replace existing movie data.
-- On a successful TMDB visit, Cineverse saves the latest popular movies, recent searches, and opened movie details in the existing SQLite database. It also saves up to eight poster images per result in `app/static/images/tmdb-cache/`. This lets the homepage, saved searches, and previously opened details keep working on networks that temporarily block TMDB. The cache is filled automatically the first time TMDB works; no sample movies are inserted. Movie cast and crew are available offline only if the detail page was opened successfully before.
-- The app creates the cache table alongside missing tables at startup; existing movie, user, review, and favorite data is preserved. Cached posters are generated files and are excluded from Git.
-- If TMDB is unavailable before any movie data has been cached, connect using a network where TMDB works and open the homepage once. Python still needs HTTPS access to `api.themoviedb.org` for fresh results.
+- SQLite lives at `instance/Cineverse.db`. Keep `.env`, the database, and backups private. The database is now ignored by Git, but this repository historically tracked it. Removing it from the current Git index does **not** erase earlier public Git history; see `IMPLEMENTATION_REPORT.md` for required owner action.
+- First startup creates an ignored, verified backup before applying schema updates to an existing file database. The additive migrations preserve users, password hashes, legacy movies, favorites, reviews, and TMDB cache entries. A test database does not write migration backups.
+- The initial local catalog seeds a small list of movie identities linked to Wikidata items. It deliberately does not make up plot, cast, artwork, or rating details. Poster fallback art is drawn with CSS.
+- An optional `OMDB_API_KEY` can be set in the private `.env`. No API key is required to run the site. OMDb requires its own terms/license review; its current API page states CC BY-NC 4.0. See `DATA_SOURCES.md`.
+- Refresh one movie explicitly (only after configuring a permitted key):
 
-Run the automated checks with `python -m unittest discover -s tests -v`.
+  ```powershell
+  python scripts/refresh_catalog.py --title "The Matrix" --year 1999 --confirm-noncommercial
+  ```
+
+  The command refuses ambiguous results, fetches details after search, and writes provider provenance. It is not run during normal page loads. No live OMDb request was verified in this environment.
+- TMDB support remains for legacy records only. Existing caches are migrated by exact provider ID; no new TMDB call is required for discovery.
+
+## Features
+
+- Local home/search/genre browsing and responsive dark/light visual design.
+- Optional OMDb adapter and scoped Wikidata entity adapter, with bounded timeouts and safe errors.
+- Accounts, hashed passwords, CSRF, sign-in throttling, first-party reviews/ratings, paragraph spoiler disclosure, edit history, helpful votes, reports, and moderator hide/restore actions.
+- Favorites, watchlist/watched status, private diary notes, custom private lists, CSV export, and preview/undo import for exact local title matches.
+- CineMatch and roulette use the local catalog. CineDuel and Cinema DNA use real account activity. CineRoom keeps choices private until its owner reveals a result.
+
+Some features are intentionally limited by the small catalog: regional language coverage exists, but the starter records lack plots, cast, real posters, ratings, and verified streaming availability. This is described honestly in the interface and source documentation.
+
+## Environment
+
+Optional values in `.env`:
+
+```dotenv
+FLASK_SECRET_KEY=use-a-long-random-private-value
+OMDB_API_KEY=your-optional-omdb-key
+CINEVERSE_MODERATOR_IDS=1,2
+SESSION_COOKIE_SECURE=0
+```
+
+`SESSION_COOKIE_SECURE=1` should be used behind HTTPS. `CINEVERSE_MODERATOR_IDS` is a comma-separated list of account IDs allowed to use `/moderation`. Do not share or commit secret values. `FLASK_SECRET_KEY` is strongly recommended; without it a temporary key is created and sessions expire on restart.
+
+## Database schema updates
+
+Migrations are ordered and recorded in `schema_migrations`. They run during app startup after taking a verified local backup. To inspect backups, open `instance/backups/`; never put that folder into Git. The migration test upgrades a separate temporary legacy-schema database and verifies that user/review/favorite rows remain linked.
+
+This is a lightweight in-project SQLite migration runner, not Alembic. Before production deployment, use a controlled backup/restore rehearsal and consider moving to Flask-Migrate if the app becomes multi-instance or receives frequent schema changes.
+
+## Tests
+
+```powershell
+python -m compileall -q app tests run.py
+python -m unittest discover -s tests -v
+```
+
+The 45-title coverage test measures local exact-title/year disambiguation using test fixtures. It does not measure live OMDb/Wikidata recall or metadata completeness. Provider fields use realistic mocked responses. Read the actual results/limitations in `IMPLEMENTATION_REPORT.md` and `DATA_SOURCES.md`.
+
+## Competitor research
+
+See `COMPETITOR_COMPARISON.md` for the reference review, data ownership patterns, design takeaways, and measured-versus-unmeasured comparisons. No competitor code or artwork was copied.

@@ -8,7 +8,7 @@ import requests
 from app.tmdb import TMDBError, movie_details, movie_genres, movies_by_genre, popular_movies, search_movies
 from app import create_app
 from app import db
-from app.models import Favorite, Movie, Review, TMDBCacheEntry, User
+from app.models import CatalogMovie, Favorite, Movie, Review, TMDBCacheEntry, User
 
 
 class TMDBClientTests(unittest.TestCase):
@@ -102,30 +102,13 @@ class FlaskPageTests(unittest.TestCase):
         })
         self.client = self.app.test_client()
 
-    def test_homepage_uses_saved_tmdb_movies_when_network_is_unavailable(self):
-        cached = [{
-            "id": 73, "title": "Saved TMDB Film", "poster_url": "https://image.tmdb.org/t/p/w500/saved.jpg",
-            "genres": ["Drama"], "rating": 7.8, "release_date": "2025-01-02",
-            "overview": "Saved public TMDB movie information.",
-        }]
-        with self.app.app_context():
-            from app.routes import _cache_tmdb_movies
-            _cache_tmdb_movies("popular", cached)
-
-        with patch("app.routes.popular_movies", side_effect=TMDBError("offline")), patch(
-            "app.routes.search_movies", side_effect=TMDBError("offline")
-        ):
-            response = self.client.get("/")
-
+    def test_homepage_uses_local_catalog_without_external_calls(self):
+        response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Saved TMDB Film", response.data)
-        self.assertIn(b"Saved public TMDB movie information.", response.data)
-        self.assertIn(b"/movie/73?source=tmdb", response.data)
-        with self.app.app_context():
-            self.assertGreaterEqual(TMDBCacheEntry.query.count(), 2)
+        self.assertIn(b"RRR", response.data)
+        self.assertIn(b"/film/", response.data)
 
-    @patch("app.routes.movie_details", side_effect=TMDBError("offline"))
-    def test_movie_page_uses_saved_tmdb_details_when_network_is_unavailable(self, details):
+    def test_movie_page_uses_saved_tmdb_details_without_network(self):
         cached = {
             "id": 74, "title": "Cached Detail Film", "poster_url": None, "genres": ["Action"],
             "rating": 8.2, "release_date": "2024-06-01", "release_year": "2024",
@@ -140,106 +123,45 @@ class FlaskPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Cached Detail Film", response.data)
         self.assertIn(b"Saved movie description.", response.data)
-        self.assertIn(b"cast and crew may be incomplete", response.data)
-        details.assert_called_once_with(74)
+        self.assertIn(b"preserved movie information", response.data)
 
-    @patch("app.routes.popular_movies")
-    @patch("app.routes.search_movies")
-    def test_homepage_rotates_ramayana_and_avengers_doomsday_from_tmdb(self, search, popular):
-        popular.return_value = [{
-            "id": 42, "title": "Example", "poster_url": "https://image.tmdb.org/t/p/w500/a.jpg",
-            "genres": ["Action"], "rating": 8.1, "overview": "A summary",
-        }]
-        search.side_effect = [
-            [{
-                "id": 1001, "title": "Ramayana: Rise of a Legend", "poster_url": "https://image.tmdb.org/t/p/w500/ramayana.jpg",
-                "genres": ["Adventure"], "rating": 8.0, "release_date": "2026-11-05",
-                "overview": "Ramayana story overview",
-            }],
-            [{
-                "id": 999, "title": "Avengers: Doomsday",
-                "poster_url": "https://image.tmdb.org/t/p/w500/doomsday.jpg",
-                "genres": ["Action"], "rating": 8.7,
-                "release_date": "2026-12-18", "overview": "TMDB story overview",
-            }],
-        ]
-
+    def test_homepage_hero_comes_from_catalog_and_not_fixed_movie_names(self):
         response = self.client.get("/")
-
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Example", response.data)
-        self.assertIn(b"Featured: <span>Ramayana: Rise of a Legend</span>", response.data)
-        self.assertIn(b"Featured: <span>Avengers: Doomsday</span>", response.data)
-        self.assertIn(b'data-interval="6000"', response.data)
-        self.assertIn(b"TMDB story overview", response.data)
-        self.assertIn(b"/movie/1001?source=tmdb", response.data)
-        self.assertIn(b"/movie/999?source=tmdb", response.data)
-        self.assertIn(b"/movie/42", response.data)
-        self.assertIn(b'class="movie-container"', response.data)
-        self.assertNotIn(b'class="genre-rows"', response.data)
-        self.assertEqual(search.call_count, 2)
-        self.assertEqual(search.call_args_list[0].args, ("Ramayana",))
-        self.assertEqual(search.call_args_list[1].args, ("Avengers: Doomsday",))
+        self.assertIn(b"Featured: <span>RRR</span>", response.data)
+        self.assertNotIn(b"Avengers: Doomsday", response.data)
 
-    @patch("app.routes.movie_details")
-    def test_movie_page_renders_director_cast_and_trailer(self, details):
-        details.return_value = {
-            "id": 42, "title": "Example", "poster_url": None, "genres": ["Drama"],
-            "rating": 8.1, "release_year": "2025", "runtime": 110, "overview": "A summary",
-            "directors": ["Director Name"], "cast": [{"name": "Actor Name", "character": "Lead", "photo_url": None}],
-            "trailer_url": "https://www.youtube.com/watch?v=abc",
-        }
-
-        response = self.client.get("/movie/42")
-
+    def test_local_movie_page_renders_saved_crew_without_provider(self):
+        with self.app.app_context():
+            from app.models import Cast, Crew
+            db.session.add(Movie(id=42, title="Example", genre="Drama", release_year=2025,
+                                 duration="110", description="A summary", trailer="https://www.youtube.com/watch?v=abc"))
+            db.session.add(Crew(movie_id=42, name="Director Name", role="Director"))
+            db.session.add(Cast(movie_id=42, actor_name="Actor Name", character_name="Lead"))
+            db.session.commit()
+        response = self.client.get("/movie/42?local=1")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Director Name", response.data)
         self.assertIn(b"Actor Name", response.data)
         self.assertIn(b"watch?v=abc", response.data)
 
-    @patch("app.routes.search_movies")
-    def test_search_form_route_renders_results(self, search):
-        search.return_value = [{"id": 42, "title": "Found", "poster_url": None, "genres": [], "rating": None}]
-
+    def test_search_form_route_searches_local_catalog(self):
         response = self.client.get("/search?q=Found")
-
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Found", response.data)
+        self.assertIn(b"No movies found", response.data)
+        response = self.client.get("/search?q=matrix")
+        self.assertIn(b"The Matrix", response.data)
 
-    @patch("app.routes.movies_by_genre")
-    @patch("app.routes.movie_genres")
-    def test_genres_page_shows_categories_and_selected_movies(self, get_genres, get_movies):
-        get_genres.return_value = [{"id": 28, "name": "Action"}, {"id": 18, "name": "Drama"}]
-        get_movies.return_value = [{
-            "id": 42, "title": "Action Film", "poster_url": None, "genres": ["Action"],
-            "rating": 8.2, "release_date": "2025-01-01", "overview": "A story",
-        }]
-
-        response = self.client.get("/genres?genre=28")
+    def test_genres_page_uses_local_catalog(self):
+        response = self.client.get("/genres?genre=Action")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Browse by genre", response.data)
         self.assertIn(b"Drama", response.data)
-        self.assertIn(b"Action Film", response.data)
-        self.assertIn(b"/movie/42?source=tmdb", response.data)
-        get_movies.assert_called_once_with(28)
+        self.assertIn(b"The Matrix", response.data)
+        self.assertIn(b"/film/", response.data)
 
-    @patch("app.routes.movies_by_genre")
-    @patch("app.routes.movie_genres")
-    def test_genres_page_shows_multiple_horizontal_genre_rows(self, get_genres, get_movies):
-        genre_items = [
-            {"id": 28, "name": "Action"},
-            {"id": 35, "name": "Comedy"},
-            {"id": 18, "name": "Drama"},
-            {"id": 12, "name": "Adventure"},
-        ]
-        get_genres.return_value = genre_items
-        get_movies.side_effect = lambda genre_id: [{
-            "id": genre_id, "title": f"{next(g['name'] for g in genre_items if g['id'] == genre_id)} film",
-            "poster_url": None, "genres": [], "rating": 7.5, "release_date": "2025-01-01",
-            "overview": "A story",
-        }]
-
+    def test_genres_page_groups_local_catalog_horizontally(self):
         response = self.client.get("/genres")
         page = response.data.decode()
 
@@ -247,11 +169,7 @@ class FlaskPageTests(unittest.TestCase):
         self.assertIn('aria-label="Action movies"', page)
         self.assertIn('aria-label="Comedy movies"', page)
         self.assertIn('aria-label="Drama movies"', page)
-        self.assertIn('aria-label="Adventure movies"', page)
-        self.assertIn("Action film", page)
-        self.assertIn("Comedy film", page)
         self.assertLess(page.index('id="genre-row-1"'), page.index('id="genre-row-2"'))
-        self.assertEqual(get_movies.call_count, 4)
 
 
 class AccountAndReviewTests(unittest.TestCase):
@@ -265,6 +183,8 @@ class AccountAndReviewTests(unittest.TestCase):
         self.client = self.app.test_client()
         with self.app.app_context():
             db.session.add(Movie(id=1, title="Local Film", genre="Drama", release_year=2024, description="A saved film."))
+            db.session.add(CatalogMovie(id=42, source="tmdb-legacy", external_id="42", title="Remote TMDB Film", year=2024,
+                                         poster_url="https://image.tmdb.org/t/p/w500/canonical.jpg", release_date="2024-01-01"))
             db.session.commit()
 
     def register(self):
@@ -368,7 +288,7 @@ class AccountAndReviewTests(unittest.TestCase):
         with self.app.app_context():
             favorite = Favorite.query.one()
             self.assertEqual(favorite.movie_key, "tmdb:42")
-            self.assertEqual(favorite.poster_url, "https://image.tmdb.org/t/p/w500/poster.jpg")
+            self.assertEqual(favorite.poster_url, "https://image.tmdb.org/t/p/w500/canonical.jpg")
 
         removed = self.client.post("/movie/42/favorite?source=tmdb")
         self.assertEqual(removed.status_code, 302)
@@ -385,7 +305,8 @@ class AccountAndReviewTests(unittest.TestCase):
         with self.app.app_context():
             remote = Favorite.query.filter_by(movie_key="tmdb:42").one()
             local = Favorite.query.filter_by(movie_key="local:1").one()
-            self.assertIsNone(remote.poster_url)
+            self.assertEqual(remote.movie_title, "Remote TMDB Film")
+            self.assertEqual(remote.poster_url, "https://image.tmdb.org/t/p/w500/canonical.jpg")
             self.assertEqual(local.movie_title, "Local Film")
             self.assertTrue(local.is_local_movie)
 

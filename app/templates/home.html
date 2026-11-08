@@ -14,8 +14,8 @@ Home | Cineverse
                     <p class="small-heading">WELCOME TO CINEVERSE</p>
                     <h1>Featured: <span>{{ featured_movie.title }}</span></h1>
                     <p class="hero-description">{{ featured_movie.overview }}</p>
-                    <p class="hero-meta">{% if featured_movie.release_date %}{{ featured_movie.release_date }}{% endif %}{% if featured_movie.rating is not none %} · TMDB ★ {{ '%.1f'|format(featured_movie.rating) }}/10{% endif %}</p>
-                    <a class="button button-primary" href="{{ url_for('main.movie', movie_id=featured_movie.id, local=1 if featured_movie.is_local|default(false) else none, source=none if featured_movie.is_local|default(false) else 'tmdb') }}">View movie</a>
+                    <p class="hero-meta">{% if featured_movie.release_date %}{{ featured_movie.release_date }}{% endif %}{% if featured_movie.rating is not none %} · {{ featured_movie.rating_source|default(featured_movie.source|default('Provider')) }} ★ {{ '%.1f'|format(featured_movie.rating) }}/10{% endif %}</p>
+                    <a class="button button-primary" href="{{ url_for('main.catalog_movie', movie_id=featured_movie.id) if featured_movie.is_catalog|default(false) else url_for('main.movie', movie_id=featured_movie.id, local=1 if featured_movie.is_local|default(false) else none, source=none if featured_movie.is_local|default(false) else 'tmdb') }}">View movie</a>
                     <a class="button button-light" href="#popular-movies">Browse popular movies</a>
                 </div>
                 {% if featured_movie.poster_url %}<div class="hero-right"><img src="{{ featured_movie.poster_url }}" alt="{{ featured_movie.title }} poster"></div>{% endif %}
@@ -41,13 +41,13 @@ Home | Cineverse
     {% if tmdb_error %}<p class="status-message" role="status">{{ tmdb_error }}{% if movies %} Showing saved movies where available.{% endif %}</p>{% endif %}
     <div class="movie-container">
         {% for movie in movies %}
-            <a class="movie-link" href="{{ url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+            <a class="movie-link" href="{{ url_for('main.catalog_movie', movie_id=movie.id) if movie.is_catalog|default(false) else url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
                 <article class="movie-card">
                     {% if movie.poster_url %}<img src="{{ movie.poster_url }}" alt="{{ movie.title }} poster" loading="lazy">{% else %}<div class="poster-placeholder">Poster unavailable</div>{% endif %}
                     <div class="movie-card-content">
                         <h3>{{ movie.title }}</h3>
                         {% if movie.genres %}<p>{{ movie.genres|join(', ') }}</p>{% endif %}
-                        {% if movie.rating is not none %}<p class="movie-rating">TMDB ★ {{ '%.1f'|format(movie.rating) }}</p>{% endif %}
+                        {% if movie.rating is not none %}<p class="movie-rating">{{ movie.rating_source|default(movie.source|default('Provider')) }} ★ {{ '%.1f'|format(movie.rating) }}/10</p>{% endif %}
                         {% if movie.release_date %}<p class="movie-date">{{ movie.release_date }}</p>{% endif %}
                         {% if movie.overview %}<p class="movie-overview">{{ movie.overview }}</p>{% endif %}
                     </div>

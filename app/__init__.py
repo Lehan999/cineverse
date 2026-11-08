@@ -20,6 +20,7 @@ def create_app(test_config=None):
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "0").casefold() in ("1", "true", "yes"),
         WTF_CSRF_ENABLED=True,
     )
     if test_config:
@@ -43,7 +44,10 @@ def create_app(test_config=None):
 
     # create_all only adds missing tables; it does not reset existing movie data.
     with app.app_context():
-        db.create_all()
+        from app.migrations import upgrade_schema
+        from app.catalog import seed_catalog
+        upgrade_schema()
+        seed_catalog()
 
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):

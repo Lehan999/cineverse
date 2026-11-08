@@ -26,7 +26,8 @@ document.querySelectorAll(".review-form").forEach((form) => {
 });
 
 const themeToggle = document.querySelector("#theme-toggle");
-const savedTheme = localStorage.getItem("cineverse-theme");
+let savedTheme = null;
+try { savedTheme = window.localStorage.getItem("cineverse-theme"); } catch (_) { /* Theme storage is optional. */ }
 document.documentElement.dataset.theme = savedTheme === "light" ? "light" : "dark";
 
 function updateThemeButton() {
@@ -41,7 +42,7 @@ updateThemeButton();
 themeToggle?.addEventListener("click", () => {
     const nextTheme = document.documentElement.dataset.theme === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = nextTheme;
-    localStorage.setItem("cineverse-theme", nextTheme);
+    try { window.localStorage.setItem("cineverse-theme", nextTheme); } catch (_) { /* Keep the current page usable when storage is blocked. */ }
     updateThemeButton();
 });
 

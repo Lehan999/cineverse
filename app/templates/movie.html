@@ -19,13 +19,13 @@
         <p><strong>Genre:</strong> {{ movie.genres|join(', ') or 'Not listed' }}</p>
         <p><strong>Release date:</strong> {{ movie.release_date or movie.release_year or 'Not listed' }}</p>
         {% if movie.runtime %}<p><strong>Duration:</strong> {{ movie.runtime }}{% if movie.runtime is number %} min{% endif %}</p>{% endif %}
-        {% if movie.rating is not none %}<p><strong>TMDB rating:</strong> <span class="movie-rating">★ {{ '%.1f'|format(movie.rating) }}/10</span></p>{% endif %}
+        {% if movie.rating_sources %}<p><strong>Ratings:</strong> {% for source, item in movie.rating_sources.items() %}<span class="movie-rating">{{ source }} {{ item.value if item is mapping else item }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% elif movie.rating is not none %}<p><strong>{{ movie.source|default('Provider') }} rating:</strong> <span class="movie-rating">★ {{ movie.rating }}</span></p>{% endif %}
         {% if movie.directors %}<p><strong>Director{{ 's' if movie.directors|length > 1 }}:</strong> {{ movie.directors|join(', ') }}</p>{% endif %}
         <h2>Story</h2><p class="movie-description">{{ movie.overview }}</p>
         {% if current_user.is_authenticated %}
-            <form class="favorite-form" method="post" action="{{ url_for('main.toggle_favorite', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+            <form class="favorite-form" method="post" action="{{ url_for('main.catalog_favorite', movie_id=movie.id) if movie.is_catalog|default(false) else url_for('main.toggle_favorite', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                {% if not movie.is_local|default(false) %}
+                {% if not movie.is_local|default(false) and not movie.is_catalog|default(false) %}
                     <input type="hidden" name="movie_title" value="{{ movie.title }}">
                     <input type="hidden" name="poster_url" value="{{ movie.poster_url or '' }}">
                     <input type="hidden" name="release_date" value="{{ movie.release_date or '' }}">
@@ -36,7 +36,11 @@
                 </button>
             </form>
         {% else %}
-            <a class="button button-favorite" href="{{ url_for('main.login', next=url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb')) }}"><span aria-hidden="true">♡</span> Sign in to save</a>
+            <a class="button button-favorite" href="{{ url_for('main.login', next=url_for('main.catalog_movie', movie_id=movie.id) if movie.is_catalog|default(false) else url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb')) }}"><span aria-hidden="true">♡</span> Sign in to save</a>
+        {% endif %}
+        {% if movie.is_catalog|default(false) and current_user.is_authenticated %}
+            <form method="post" action="{{ url_for('main.watch_movie', movie_id=movie.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Save status <select name="status"><option value="watchlist">Add to watchlist</option><option value="watched">Mark watched</option></select></label><label>Private diary note <textarea name="private_note" maxlength="2000" placeholder="Only you can see this note"></textarea></label><button class="button button-light">Save my status</button></form>
+            {% if collections %}{% for collection in collections %}<form method="post" action="{{ url_for('main.add_to_list', list_id=collection.id, movie_id=movie.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-light">Add to {{ collection.title }}</button></form>{% endfor %}{% else %}<p><a href="{{ url_for('main.user_lists') }}">Create a custom list</a></p>{% endif %}
         {% endif %}
         {% if movie.trailer_url %}<a class="button button-primary" href="{{ movie.trailer_url }}" target="_blank" rel="noopener">Watch trailer</a>{% endif %}
     </div>
@@ -69,13 +73,14 @@
     <div class="section-heading"><div><p class="small-heading">COMMUNITY</p><h2>Ratings &amp; reviews</h2></div>
         {% if average_rating is not none %}<p>Community average <strong>{{ '%.1f'|format(average_rating) }}/10</strong></p>{% endif %}
     </div>
+    <p><a class="text-link" href="{{ request.path }}?sort=helpful#reviews">Sort by helpful votes</a> · <a class="text-link" href="{{ request.path }}#reviews">Newest first</a></p>
     {% if current_user.is_authenticated %}
-        <form class="form-card review-form" method="post" action="{{ url_for('main.submit_review', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
+        <form class="form-card review-form" method="post" action="{{ url_for('main.catalog_review', movie_id=movie.id) if movie.is_catalog|default(false) else url_for('main.submit_review', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
             {{ review_form.hidden_tag() }}
-            <input type="hidden" name="movie_title" value="{{ movie.title }}">
+            {% if not movie.is_catalog|default(false) %}<input type="hidden" name="movie_title" value="{{ movie.title }}">{% endif %}
             <p class="form-intro">{{ 'Update your rating or review' if my_review else 'Share your rating and review' }}</p>
             <div class="form-field">{{ review_form.rating.label }}{{ review_form.rating(min=1, max=10, step=1, required=true) }}{% for error in review_form.rating.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
-            <div class="form-field">{{ review_form.review_text.label }}{{ review_form.review_text(rows=4, maxlength=2000, placeholder='What did you think of this movie?') }}{% for error in review_form.review_text.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
+            <div class="form-field">{{ review_form.review_text.label }}{{ review_form.review_text(rows=5, maxlength=2000, placeholder='What did you think? Wrap spoiler text in [[spoiler]] ... [[/spoiler]].') }}<small>Hide a paragraph by wrapping only its spoiler text with [[spoiler]] and [[/spoiler]].</small>{% for error in review_form.review_text.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</div>
             {{ review_form.submit(class_='button button-primary') }}
         </form>
     {% else %}
@@ -85,8 +90,9 @@
         {% for review in reviews %}
             <article class="review-card">
                 <div class="review-header"><strong>{{ review.user.username }}</strong><span class="movie-rating">★ {{ review.rating }}/10</span></div>
-                {% if review.review_text %}<p>{{ review.review_text }}</p>{% else %}<p class="muted">Rating only</p>{% endif %}
+                {% if review.spoiler_paragraphs_json %}{% for block in review.spoiler_paragraphs_json %}{% if block.spoiler %}<details class="spoiler-block"><summary>Spoiler — open paragraph</summary><p>{{ block.text }}</p></details>{% else %}<p>{{ block.text }}</p>{% endif %}{% endfor %}{% elif review.review_text %}<p>{{ review.review_text }}</p>{% else %}<p class="muted">Rating only</p>{% endif %}
                 <time datetime="{{ review.updated_at.isoformat() }}">{{ review.updated_at.strftime('%b %d, %Y') }}</time>
+                {% if current_user.is_authenticated and current_user.id != review.user_id %}<form method="post" action="{{ url_for('main.review_helpful', review_id=review.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Helpful ({{ review.helpful_votes|default(0) }})</button></form><form method="post" action="{{ url_for('main.report_review', review_id=review.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="reason" value="Please review this content"><button type="submit">Report</button></form>{% endif %}
             </article>
         {% else %}<p class="empty-state">No community reviews yet. Be the first to share a rating.</p>{% endfor %}
     </div>
