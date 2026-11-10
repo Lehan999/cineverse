@@ -145,12 +145,61 @@ class FlaskPageTests(unittest.TestCase):
         self.assertIn(b"Actor Name", response.data)
         self.assertIn(b"watch?v=abc", response.data)
 
-    def test_search_form_route_searches_local_catalog(self):
-        response = self.client.get("/search?q=Found")
+    @patch("app.routes.tmdb.search_movies")
+    def test_search_uses_tmdb_after_local_catalog_miss_and_caches_detail(self, search_movies):
+        search_movies.return_value = [{
+            "id": 299536,
+            "title": "Avengers: Infinity War",
+            "poster_url": "https://image.tmdb.org/t/p/w500/infinity-war.jpg",
+            "genres": ["Action", "Adventure"],
+            "rating": 8.2,
+            "release_date": "2018-04-25",
+            "release_year": "2018",
+            "overview": "The Avengers face a powerful new threat.",
+        }]
+
+        response = self.client.get("/search?q=avengers+infinity+war")
+
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No movies found", response.data)
+        self.assertIn(b"Avengers: Infinity War", response.data)
+        self.assertIn(b"https://image.tmdb.org/t/p/w500/infinity-war.jpg", response.data)
+        self.assertNotIn(b"Endless stories", response.data)
+        search_movies.assert_called_once_with("avengers infinity war")
+        detail_response = self.client.get("/movie/299536?source=tmdb")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn(b"Avengers: Infinity War", detail_response.data)
+
+    @patch("app.routes.tmdb.search_movies")
+    def test_search_empty_and_invalid_queries_have_clear_states(self, search_movies):
+        search_movies.return_value = []
+        response = self.client.get("/search?q=not+a+real+movie")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"No movies found for", response.data)
+        self.assertIn(b"Check the spelling", response.data)
+        self.assertNotIn(b"Endless stories", response.data)
+
+        response = self.client.get("/search?q=%25%25%25")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Try a title with letters or numbers", response.data)
+        search_movies.assert_called_once_with("not a real movie")
+
+    @patch("app.routes.tmdb.search_movies")
+    def test_search_provider_failure_has_a_clean_fallback_state(self, search_movies):
+        from app.tmdb import TMDBError
+        search_movies.side_effect = TMDBError("network details are intentionally hidden")
+        response = self.client.get("/search?q=unavailable+film")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"We couldn", response.data)
+        self.assertIn(b"Online movie search is temporarily unavailable", response.data)
+        self.assertNotIn(b"Endless stories", response.data)
+        self.assertNotIn(b"network details", response.data)
+
+    @patch("app.routes.tmdb.search_movies")
+    def test_search_keeps_local_catalog_results_without_provider_request(self, search_movies):
         response = self.client.get("/search?q=matrix")
+        self.assertEqual(response.status_code, 200)
         self.assertIn(b"The Matrix", response.data)
+        search_movies.assert_not_called()
 
     def test_genres_page_uses_local_catalog(self):
         response = self.client.get("/genres?genre=Action")

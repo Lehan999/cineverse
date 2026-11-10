@@ -55,6 +55,22 @@ class CineverseFeatureTests(unittest.TestCase):
         response = self.client.get("/genres")
         self.assertEqual(response.status_code, 200)
 
+    def test_genres_hide_only_avengers_endgame_and_preserve_other_titles(self):
+        with self.app.app_context():
+            db.session.add_all([
+                CatalogMovie(source="fixture", external_id="avengers-endgame", title="Avengers Endgame",
+                             genres_json=["Action"]),
+                CatalogMovie(source="fixture", external_id="avengers-doomsday", title="Avengers: Doomsday",
+                             genres_json=["Action"]),
+            ])
+            db.session.commit()
+        response = self.client.get("/genres?genre=Action")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Avengers Endgame", response.data)
+        self.assertIn(b"Avengers: Doomsday", response.data)
+        with self.app.app_context():
+            self.assertEqual(CatalogMovie.query.filter(CatalogMovie.title.ilike("%avengers%")).count(), 2)
+
     def test_watch_status_and_private_diary_note(self):
         self.register()
         response = self.client.post(f"/film/{self.movie_id}/watch", data={"status": "watched", "private_note": "my private note"})

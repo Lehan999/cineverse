@@ -1,6 +1,6 @@
 # Cineverse
 
-Cineverse is a Flask movie-discovery and personal movie journal. The homepage, search, genres and recommendation screens read a local SQLite catalog, so they continue to work when a metadata API is unavailable. Optional providers enrich that catalog only through an explicit maintenance command.
+Cineverse is a Flask movie-discovery and personal movie journal. The homepage, genres and recommendation screens read the local SQLite catalog. Search checks that catalog first, then makes a TMDb request only when a user explicitly searches for a title that is not saved locally; provider outages leave local browsing available.
 
 ## Start on Windows
 
@@ -19,7 +19,7 @@ If the virtual environment already exists, activate it and run `python run.py`. 
 
 - SQLite lives at `instance/Cineverse.db`. Keep `.env`, the database, and backups private. The database is now ignored by Git, but this repository historically tracked it. Removing it from the current Git index does **not** erase earlier public Git history; see `IMPLEMENTATION_REPORT.md` for required owner action.
 - First startup creates an ignored, verified backup before applying schema updates to an existing file database. The additive migrations preserve users, password hashes, legacy movies, favorites, reviews, and TMDB cache entries. A test database does not write migration backups.
-- The initial local catalog seeds a small list of movie identities linked to Wikidata items. It deliberately does not make up plot, cast, artwork, or rating details. Poster fallback art is drawn with CSS.
+- The local catalog seeds a small list of film identities linked to Wikidata. Poster artwork for 98 of 109 saved titles is cached locally; 11 records currently have no poster supplied by TMDB and use the designed fallback. Plot, cast, and rating fields remain empty when no provider data is available.
 - An optional `OMDB_API_KEY` can be set in the private `.env`. No API key is required to run the site. OMDb requires its own terms/license review; its current API page states CC BY-NC 4.0. See `DATA_SOURCES.md`.
 - Refresh one movie explicitly (only after configuring a permitted key):
 
@@ -28,7 +28,7 @@ If the virtual environment already exists, activate it and run `python run.py`. 
   ```
 
   The command refuses ambiguous results, fetches details after search, and writes provider provenance. It is not run during normal page loads. No live OMDb request was verified in this environment.
-- TMDB support remains for legacy records only. Existing caches are migrated by exact provider ID; no new TMDB call is required for discovery.
+- TMDb is also used as an explicit search fallback for titles missing from the local catalog. Search results stay out of the curated catalog and use the existing bounded TMDb cache for detail links and offline retry. Homepage and genre page loads remain provider-free.
 
 ## Features
 

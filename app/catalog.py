@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 import os
 import re
 import time
+from pathlib import Path
 
 import requests
 
@@ -36,7 +37,14 @@ def safe_artwork_url(value):
     from urllib.parse import urlsplit
     candidate = (value or "").strip()[:500]
     if candidate.startswith("/static/") and ".." not in candidate.split("/"):
-        return candidate
+        static_root = (Path(__file__).resolve().parent / "static").resolve()
+        relative = Path(*candidate[len("/static/"):].split("/"))
+        local_path = (static_root / relative).resolve()
+        try:
+            local_path.relative_to(static_root)
+        except ValueError:
+            return None
+        return candidate if local_path.is_file() else None
     try:
         parsed = urlsplit(candidate)
     except ValueError:

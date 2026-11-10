@@ -16,12 +16,12 @@ from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
-from app import db
+from app import db, tmdb
 from app.forms import LoginForm, RegistrationForm, ReviewForm
 from app.models import (Cast, CatalogMovie, CineRoom, CineRoomVote, Crew, DuelPreference,
     Favorite, ImportPreview, Movie, Review, ReviewHistory, ReviewReport, ReviewVote,
     AuthThrottle, TMDBCacheEntry, User, UserCollection, UserCollectionItem, WatchEntry)
-from app.catalog import as_card, find_local_movies, resolve_catalog_title, safe_artwork_url
+from app.catalog import as_card, find_local_movies, normalize_title, resolve_catalog_title, safe_artwork_url
 
 main = Blueprint("main", __name__)
 
@@ -61,25 +61,66 @@ def _select_featured_result(results, expected_title, preferred_year=None):
 @main.route("/search")
 def search():
     query = request.args.get("q", "").strip()[:100]
-    movies = [as_card(row) for row in find_local_movies(query)]
+    if not query:
+        return redirect(url_for("main.home"))
+
+    movies = []
+    tmdb_error = None
+    search_notice = None
+    search_input_error = not normalize_title(query)
+
+    if not search_input_error:
+        movies = [as_card(row) for row in find_local_movies(query)]
+        if not movies:
+            cache_key = f"search:{normalize_title(query)}"
+            cached_results = _read_tmdb_cache(cache_key)
+            try:
+                provider_results = tmdb.search_movies(query)
+            except tmdb.TMDBError:
+                provider_results = cached_results if isinstance(cached_results, list) else []
+                if provider_results:
+                    search_notice = "TMDb is unavailable right now. Showing your most recent saved search results."
+                else:
+                    tmdb_error = "Online movie search is temporarily unavailable. Please try again shortly."
+            else:
+                if provider_results:
+                    # Save only user-requested results, plus the existing bounded detail cache
+                    # needed by the movie links. Homepage and genre rendering stay offline.
+                    _cache_tmdb_movies(cache_key, provider_results)
+
+            movies = [
+                {
+                    **movie,
+                    "poster_url": safe_artwork_url(movie.get("poster_url")),
+                    "source": "TMDb",
+                    "rating_source": "TMDb",
+                }
+                for movie in provider_results
+            ]
+
     return render_template(
         "home.html",
         movies=movies,
-        featured_movies=[movies[0]] if movies else [],
+        featured_movies=[],
         query=query,
-        tmdb_error="No matches in the saved catalog. Provider search is optional and is not called during page loading." if query and not movies else None,
+        tmdb_error=tmdb_error,
+        search_notice=search_notice,
+        search_input_error=search_input_error,
     )
 
 
 @main.get("/genres")
 def genres():
     selected_genre = request.args.get("genre", "").strip() or None
-    all_movies = [as_card(row) for row in find_local_movies(genre=selected_genre)]
+    def genre_catalog(genre=None):
+        return [row for row in find_local_movies(genre=genre) if row.title.strip().casefold() != "avengers endgame"]
+
+    all_movies = [as_card(row) for row in genre_catalog(selected_genre)]
     genre_names = sorted({genre for movie in CatalogMovie.query.all() for genre in (movie.genres_json or [])})
     genre_list = [{"id": name, "name": name} for name in genre_names]
     genre_rows = [{"name": selected_genre, "movies": all_movies}] if selected_genre else [
-        {"name": name, "movies": [as_card(row) for row in find_local_movies(genre=name)]}
-        for name in genre_names if find_local_movies(genre=name)
+        {"name": name, "movies": [as_card(row) for row in genre_catalog(name)]}
+        for name in genre_names if genre_catalog(name)
     ]
     movies = all_movies
 
@@ -628,6 +669,8 @@ def account():
 @login_required
 def favorites():
     saved_movies = Favorite.query.filter_by(user_id=current_user.id).order_by(Favorite.created_at.desc()).all()
+    for favorite in saved_movies:
+        favorite.poster_url = safe_artwork_url(favorite.poster_url)
     return render_template("favorites.html", favorites=saved_movies)
 
 
@@ -666,7 +709,7 @@ def toggle_favorite(movie_id):
             if record is None:
                 abort(404)
             title = record.title
-            poster_url = record.poster_url if record.poster_url and record.poster_url.startswith("/static/") else _validated_tmdb_poster(record.poster_url or "")
+            poster_url = safe_artwork_url(record.poster_url) or _validated_tmdb_poster(record.poster_url or "")
             release_date = record.release_date or str(record.year or "")
 
         db.session.add(Favorite(
@@ -779,8 +822,6 @@ def _validated_tmdb_poster(poster_url):
     parsed = urlsplit(candidate)
     if parsed.scheme == "https" and parsed.netloc == "image.tmdb.org" and parsed.path.startswith("/t/p/"):
         return candidate
-    if re.fullmatch(r"/static/images/tmdb-cache/movie-\d+\.jpg", candidate):
-        return candidate
     return None
 
 
@@ -880,12 +921,26 @@ def _cached_tmdb_movie_pool():
     return movies
 
 
+def _local_static_url(filename):
+    if not filename:
+        return None
+    static_root = os.path.realpath(current_app.static_folder)
+    local_path = os.path.realpath(os.path.join(static_root, filename))
+    try:
+        if os.path.commonpath((static_root, local_path)) != static_root or not os.path.isfile(local_path):
+            return None
+    except (OSError, ValueError):
+        return None
+    relative_path = os.path.relpath(local_path, static_root).replace(os.sep, "/")
+    return url_for("static", filename=relative_path)
+
+
 def _local_movies():
     return [
         {
             "id": movie.id,
             "title": movie.title,
-            "poster_url": url_for("static", filename=movie.poster) if movie.poster else None,
+            "poster_url": _local_static_url(movie.poster),
             "genres": (movie.genre or "").split(),
             "rating": None,  # Legacy imdb_rating is not presented as a TMDB rating.
             "release_date": str(movie.release_year or ""),
@@ -904,7 +959,7 @@ def _local_movie_details(movie):
         "id": movie.id,
         "movie_key": f"local:{movie.id}",
         "title": movie.title,
-        "poster_url": url_for("static", filename=movie.poster) if movie.poster else None,
+        "poster_url": _local_static_url(movie.poster),
         "genres": (movie.genre or "").split(),
         "rating": None,
         "release_date": str(movie.release_year or ""),
@@ -912,12 +967,12 @@ def _local_movie_details(movie):
         "runtime": movie.duration,
         "overview": movie.description or "No description is available.",
         "cast": [
-            {"name": person.actor_name, "character": person.character_name, "photo_url": url_for("static", filename=person.photo) if person.photo else None}
+            {"name": person.actor_name, "character": person.character_name, "photo_url": _local_static_url(person.photo)}
             for person in cast
         ],
         "directors": [person.name for person in crew if person.role and person.role.casefold() == "director"],
         "crew": [
-            {"name": person.name, "job": person.role or "Crew", "department": "", "photo_url": url_for("static", filename=person.photo) if person.photo else None}
+            {"name": person.name, "job": person.role or "Crew", "department": "", "photo_url": _local_static_url(person.photo)}
             for person in crew
         ],
         "trailer_url": movie.trailer,

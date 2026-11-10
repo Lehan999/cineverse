@@ -78,8 +78,10 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertIsNone(safe_artwork_url("javascript:alert(1)"))
         self.assertIsNone(safe_artwork_url("https://untrusted.example/poster.jpg"))
         self.assertEqual(safe_artwork_url("https://image.tmdb.org/t/p/w500/poster.jpg"), "https://image.tmdb.org/t/p/w500/poster.jpg")
-        self.assertEqual(safe_artwork_url("/static/images/poster.png"), "/static/images/poster.png")
+        self.assertIsNone(safe_artwork_url("/static/images/avengers_endgame.png"))
+        self.assertIsNone(safe_artwork_url("/static/images/tmdb-cache/movie-999999999.jpg"))
 
 
 if __name__ == "__main__":
     unittest.main()
+

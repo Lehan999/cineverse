@@ -6,10 +6,13 @@ Home | Cineverse
 
 {% block content %}
 
+{% if not query|default('') %}
 <section class="hero-section{% if featured_movies|length > 1 %} hero-carousel{% endif %}"{% if featured_movies|length > 1 %} data-hero-carousel data-interval="6000" aria-roledescription="carousel" aria-label="Featured movies"{% endif %}>
     {% if featured_movies %}
         {% for featured_movie in featured_movies %}
             <article class="hero-slide{% if loop.first %} is-active{% else %} is-after{% endif %}" data-hero-slide aria-roledescription="slide" aria-label="{{ loop.index }} of {{ loop.length }}" aria-hidden="{{ 'false' if loop.first else 'true' }}"{% if not loop.first %} inert{% endif %}>
+                {% set hero_artwork = featured_movie.artwork_url or featured_movie.poster_url %}
+                {% if hero_artwork %}<div class="hero-backdrop" aria-hidden="true"><img src="{{ hero_artwork }}" alt=""></div>{% endif %}
                 <div class="hero-left">
                     <p class="small-heading">WELCOME TO CINEVERSE</p>
                     <h1>Featured: <span>{{ featured_movie.title }}</span></h1>
@@ -31,6 +34,8 @@ Home | Cineverse
     {% endif %}
 </section>
 
+{% endif %}
+
 {% if featured_notice %}<p class="status-message featured-notice" role="status">{{ featured_notice }}</p>{% endif %}
 
 <section class="popular-movies" id="popular-movies">
@@ -38,7 +43,7 @@ Home | Cineverse
         <div><p class="small-heading">CINEVERSE PICKS</p><h2>{{ 'Search results' if query|default('') else 'Popular movies' }}</h2></div>
         {% if query|default('') %}<p>Results for “{{ query }}”</p>{% endif %}
     </div>
-    {% if tmdb_error %}<p class="status-message" role="status">{{ tmdb_error }}{% if movies %} Showing saved movies where available.{% endif %}</p>{% endif %}
+    {% if search_notice %}<p class="status-message search-notice" role="status">{{ search_notice }}</p>{% endif %}
     <div class="movie-container">
         {% for movie in movies %}
             <a class="movie-link" href="{{ url_for('main.catalog_movie', movie_id=movie.id) if movie.is_catalog|default(false) else url_for('main.movie', movie_id=movie.id, local=1 if movie.is_local|default(false) else none, source=none if movie.is_local|default(false) else 'tmdb') }}">
@@ -54,7 +59,13 @@ Home | Cineverse
                 </article>
             </a>
         {% else %}
-            <p class="empty-state">No movies found.</p>
+            <div class="search-empty" role="status" aria-live="polite">
+                <span class="search-empty-icon" aria-hidden="true">⌕</span>
+                <p class="small-heading">{{ 'SEARCH UNAVAILABLE' if tmdb_error else 'NO MATCHES' }}</p>
+                <h3>{% if tmdb_error %}We couldn’t complete that search{% elif search_input_error %}Try a title with letters or numbers{% else %}No movies found for “{{ query }}”{% endif %}</h3>
+                <p>{% if tmdb_error %}{{ tmdb_error }}{% elif search_input_error %}Use at least one letter or number, or try a shorter movie title.{% else %}Check the spelling or try a shorter version of the title.{% endif %}</p>
+                <a class="button button-primary" href="{{ url_for('main.home') }}">Browse saved movies</a>
+            </div>
         {% endfor %}
     </div>
 </section>
